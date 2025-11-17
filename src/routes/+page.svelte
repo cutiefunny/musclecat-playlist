@@ -34,7 +34,12 @@
 	let isAdmin = false;
 	const ADMIN_EMAIL = 'cutiefunny@gmail.com'; // 관리자 이메일
 
-	// --- 2. Firestore 로드 및 Auth 상태 감지 ---
+	// --- 2. 수정 상태 변수 (신규) ---
+	let editingSongId = null; // 현재 수정 중인 곡의 ID
+	let editTitle = ''; // 수정 중인 제목
+	let editArtist = ''; // 수정 중인 아티스트
+
+	// --- 3. Firestore 로드 및 Auth 상태 감지 ---
 	onMount(() => {
 		// Firestore 실시간 리스너
 		const q = query(collection(db, 'songs'), orderBy('order', 'asc'));
@@ -46,6 +51,9 @@
 					songList.push({ id: doc.id, ...doc.data() });
 				});
 				songs = songList;
+
+				// 수정 중이었다면 목록 새로고침 시 수정 모드 해제
+				cancelEdit();
 
 				if (!isShuffle) {
 					playQueue = [...songs];
@@ -63,6 +71,10 @@
 		const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
 			currentUser = user;
 			isAdmin = user?.email === ADMIN_EMAIL;
+			// 로그아웃 시 수정 모드 강제 해제
+			if (!isAdmin) {
+				cancelEdit();
+			}
 
 			if (user) {
 				if (isAdmin) {
@@ -82,17 +94,15 @@
 		};
 	});
 
-	// --- 3. 로그인/로그아웃 토글 함수 ---
+	// --- 4. 로그인/로그아웃 토글 함수 ---
 	async function handleAuthToggle() {
 		if (isLoading) return; // 로딩 중에는 실행 방지
 
 		if (currentUser) {
 			// 이미 로그인된 경우, 즉시 로그아웃
-			// [수정] confirm()은 샌드박스 환경에서 작동하지 않으므로 제거
 			isLoading = true;
 			statusMessage = '로그아웃 중...';
 			await logout();
-			// onAuthStateChanged가 statusMessage를 자동으로 업데이트합니다.
 			isLoading = false;
 		} else {
 			// 로그인되지 않은 경우, Google 로그인 시도
@@ -100,7 +110,6 @@
 			statusMessage = 'Google 계정으로 로그인 중...';
 			try {
 				await login();
-				// onAuthStateChanged가 statusMessage를 자동으로 업데이트합니다.
 			} catch (error) {
 				console.error('Login failed:', error);
 				statusMessage = '로그인에 실패했습니다.';
@@ -110,7 +119,7 @@
 		}
 	}
 
-	// --- 4. 파일 업로드 및 Firestore 저장 (다중 파일 처리) ---
+	// --- 5. 파일 업로드 및 Firestore 저장 (다중 파일 처리) ---
 	async function handleFileUpload(event) {
 		// (기존 코드와 동일)
 		const files = event.target.files;
@@ -165,9 +174,9 @@
 		}
 	}
 
-	// --- 5. 순서 변경 함수 ---
+	// --- 6. 순서 변경 함수 ---
 	async function moveSong(currentIndex, direction) {
-		if (!isAdmin) return; // 관리자만 실행
+		if (!isAdmin || editingSongId) return; // 관리자만, 수정 중이 아닐 때만
 		const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
 		if (newIndex < 0 || newIndex >= songs.length) return;
 		isLoading = true;
@@ -186,7 +195,50 @@
 		}
 	}
 
-	// --- 6. 셔플 배열 생성 (Fisher-Yates) ---
+	// --- 7. 수정 관련 함수 (신규) ---
+
+	/** 수정 모드 시작 */
+	function startEdit(song) {
+		editingSongId = song.id;
+		editTitle = song.title;
+		editArtist = song.artist;
+	}
+
+	/** 수정 모드 취소 */
+	function cancelEdit() {
+		editingSongId = null;
+		editTitle = '';
+		editArtist = '';
+	}
+
+	/** 수정 내용 저장 */
+	async function saveEdit(songId) {
+		if (!isAdmin || !editingSongId || songId !== editingSongId) return;
+		if (!editTitle.trim() || !editArtist.trim()) {
+			statusMessage = '제목과 아티스트는 비워둘 수 없습니다.';
+			return;
+		}
+
+		isLoading = true;
+		statusMessage = '정보 업데이트 중...';
+
+		try {
+			const docRef = doc(db, 'songs', songId);
+			await updateDoc(docRef, {
+				title: editTitle.trim(),
+				artist: editArtist.trim()
+			});
+			statusMessage = '업데이트 완료.';
+		} catch (error) {
+			console.error('Failed to update song info:', error);
+			statusMessage = '업데이트에 실패했습니다.';
+		} finally {
+			isLoading = false;
+			cancelEdit(); // 수정 모드 종료
+		}
+	}
+
+	// --- 8. 셔플 배열 생성 (Fisher-Yates) ---
 	function getShuffledArray(array) {
 		// (기존 코드와 동일)
 		const newArr = [...array];
@@ -197,7 +249,7 @@
 		return newArr;
 	}
 
-	// --- 7. 셔플 토글 함수 ---
+	// --- 9. 셔플 토글 함수 ---
 	function toggleShuffle() {
 		// (기존 코드와 동일)
 		isShuffle = !isShuffle;
@@ -211,8 +263,9 @@
 		currentQueueIndex = currentSong ? playQueue.findIndex((s) => s.id === currentSong.id) : -1;
 	}
 
-	// --- 8. 노래 재생 ---
+	// --- 10. 노래 재생 ---
 	function playSong(song) {
+		if (editingSongId) return; // 수정 중에는 재생 방지
 		// (기존 코드와 동일)
 		currentSong = song;
 		if (isShuffle) {
@@ -226,7 +279,7 @@
 		currentListIndex = songs.findIndex((s) => s.id === song.id);
 	}
 
-	// --- 9. 다음 곡/이전 곡 ---
+	// --- 11. 다음 곡/이전 곡 ---
 	function playNext() {
 		// (기존 코드와 동일)
 		if (playQueue.length === 0) return;
@@ -251,7 +304,7 @@
 		currentListIndex = songs.findIndex((s) => s.id === currentSong.id);
 	}
 
-	// --- 10. Media Session API 설정 ---
+	// --- 12. Media Session API 설정 ---
 	function setupMediaSession() {
 		// (기존 코드와 동일)
 		if (!('mediaSession' in navigator) || !currentSong) return;
@@ -287,15 +340,11 @@
 		playNext();
 	}
 
-	// --- 11. 음원 삭제 기능 ---
+	// --- 13. 음원 삭제 기능 ---
 	async function deleteSong(songToDelete) {
-		if (!isAdmin) return; // 관리자만 실행
+		if (!isAdmin || editingSongId) return; // 관리자만, 수정 중이 아닐 때만
 		if (!songToDelete) return;
 
-		// [수정] confirm()은 샌드박스 환경에서 작동하지 않으므로 제거
-		// if (!confirm(`'${songToDelete.title}' 음원을 삭제하시겠습니까?`)) {
-		// 	return;
-		// }
 		isLoading = true;
 		statusMessage = `'${songToDelete.title}' 삭제 중...`;
 		try {
@@ -406,7 +455,7 @@
 				{#each songs as song, index (song.id)}
 					<li class:playing={currentListIndex === index}>
 						<!-- 
-							순서 변경 컨트롤은 관리자에게만 보입니다.
+							[수정] 순서 변경 컨트롤 (수정 중이 아닐 때만)
 						-->
 						{#if isAdmin}
 							<div class="move-controls">
@@ -414,7 +463,7 @@
 									type="button"
 									class="move-button"
 									on:click={() => moveSong(index, 'up')}
-									disabled={index === 0 || isLoading}
+									disabled={index === 0 || isLoading || editingSongId}
 									aria-label="위로 이동"
 								>
 									🔼
@@ -423,7 +472,7 @@
 									type="button"
 									class="move-button"
 									on:click={() => moveSong(index, 'down')}
-									disabled={index === songs.length - 1 || isLoading}
+									disabled={index === songs.length - 1 || isLoading || editingSongId}
 									aria-label="아래로 이동"
 								>
 									🔽
@@ -431,31 +480,74 @@
 							</div>
 						{/if}
 
-						<button
-							type="button"
-							class="song-button"
-							on:click={() => playSong(song)}
-							aria-label="Play {song.title}"
-						>
-							<div class="song-info">
-								<span class="title">{song.title}</span>
-								<span class="artist">{song.artist}</span>
-							</div>
-						</button>
-
 						<!-- 
-							삭제 버튼은 관리자에게만 보입니다.
+							[수정] 수정 모드에 따른 분기 처리
 						-->
-						{#if isAdmin}
+						{#if editingSongId === song.id}
+							<!-- 1. 수정 모드일 때 (관리자 전용) -->
+							<form class="edit-form" on:submit|preventDefault={() => saveEdit(song.id)}>
+								<input
+									type="text"
+									class="edit-input"
+									bind:value={editTitle}
+									placeholder="제목"
+									required
+								/>
+								<input
+									type="text"
+									class="edit-input"
+									bind:value={editArtist}
+									placeholder="아티스트"
+									required
+								/>
+								<button type="submit" class="edit-button edit-save" disabled={isLoading}>저장</button>
+								<button
+									type="button"
+									class="edit-button edit-cancel"
+									on:click={cancelEdit}
+									disabled={isLoading}
+								>
+									취소
+								</button>
+							</form>
+						{:else}
+							<!-- 2. 기본 표시 모드일 때 -->
 							<button
 								type="button"
-								class="delete-button"
-								on:click={() => deleteSong(song)}
-								disabled={isLoading}
-								aria-label="Delete {song.title}"
+								class="song-button"
+								on:click={() => playSong(song)}
+								aria-label="Play {song.title}"
+								disabled={editingSongId}
 							>
-								&times;
+								<div class="song-info">
+									<span class="title">{song.title}</span>
+									<span class="artist">{song.artist}</span>
+								</div>
 							</button>
+
+							<!-- 3. 관리자 컨트롤 (수정/삭제) -->
+							{#if isAdmin}
+								<div class="admin-controls">
+									<button
+										type="button"
+										class="edit-button"
+										on:click={() => startEdit(song)}
+										disabled={isLoading || editingSongId}
+										aria-label="Edit {song.title}"
+									>
+										✏️
+									</button>
+									<button
+										type="button"
+										class="delete-button"
+										on:click={() => deleteSong(song)}
+										disabled={isLoading || editingSongId}
+										aria-label="Delete {song.title}"
+									>
+										&times;
+									</button>
+								</div>
+							{/if}
 						{/if}
 					</li>
 				{/each}
@@ -667,6 +759,10 @@
 	.song-button:hover {
 		background-color: #2a2a2a;
 	}
+	.song-button:disabled {
+		cursor: not-allowed;
+		background-color: transparent;
+	}
 	.playlist-wrapper li.playing .song-button:hover {
 		background: none;
 	}
@@ -683,6 +779,71 @@
 		display: block;
 		font-size: 0.9rem;
 		color: #a0a0a0;
+	}
+
+	/* --- [신규] 수정 폼 스타일 --- */
+	.edit-form {
+		display: flex;
+		flex-grow: 1;
+		align-items: center;
+		padding: 0.5rem 0.75rem;
+		gap: 0.5rem;
+	}
+	.edit-input {
+		flex-grow: 1;
+		width: 30%; /* 유연한 너비 */
+		background-color: #333;
+		color: #e0e0e0;
+		border: 1px solid #555;
+		border-radius: 4px;
+		padding: 0.5rem;
+		font-size: 0.9rem;
+	}
+	.edit-input:focus {
+		border-color: #40c9a9;
+		outline: none;
+	}
+
+	/* --- [신규] 관리자 컨트롤 (수정/삭제) --- */
+	.admin-controls {
+		display: flex;
+		align-items: stretch;
+		flex-shrink: 0;
+	}
+	.edit-button {
+		background: none;
+		border: none;
+		color: #888;
+		padding: 0 0.75rem;
+		cursor: pointer;
+		font-size: 1.2rem;
+		transition: background-color 0.2s, color 0.2s;
+	}
+	.edit-button:hover {
+		color: #40c9a9;
+		background-color: #2a2a2a;
+	}
+	.edit-button.edit-save {
+		font-size: 0.9rem;
+		font-weight: bold;
+		color: #40c9a9;
+	}
+	.edit-button.edit-cancel {
+		font-size: 0.9rem;
+		color: #aaa;
+	}
+	.edit-button.edit-save:hover {
+		background-color: #36ab8f;
+		color: #121212;
+	}
+	.edit-button.edit-cancel:hover {
+		background-color: #555;
+		color: #fff;
+	}
+	.edit-button:disabled {
+		color: #555;
+		cursor: not-allowed;
+		background: none;
 	}
 
 	/* 삭제 버튼 */
