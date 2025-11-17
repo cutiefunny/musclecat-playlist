@@ -1,0 +1,22 @@
+{
+	"name": "근육고양이 플레이리스트",
+	"short_name": "플레이리스트",
+	"description": "근육고양이 매장에서 재생되는 음악들을 모아놓은 플레이리스트입니다.",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#121212",
+	"theme_color": "#40c9a9",
+	"icons": [
+		{
+			"src": "/icon-192.png",
+			"sizes": "192x192",
+			"type": "image/png"
+		},
+		{
+			"src": "/icon-512.png",
+			"sizes": "512x512",
+			"type": "image/png"
+		}
+	]
+}
