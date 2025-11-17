@@ -1,7 +1,14 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+// 'firebase/auth'에서 필요한 함수들을 추가로 가져옵니다.
+import {
+	getAuth,
+	GoogleAuthProvider,
+	signInWithPopup,
+	signOut,
+	onAuthStateChanged
+} from 'firebase/auth';
 
 // 1. .env 파일에서 Firebase 설정 값 가져오기
 const firebaseConfig = {
@@ -16,15 +23,33 @@ const firebaseConfig = {
 // 2. Firebase 앱 초기화
 const app = initializeApp(firebaseConfig);
 
-// 3. Firebase 서비스 내보내기
+// 3. Firebase 서비스 가져오기
 const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
 
-// 4. 익명 로그인을 통해 Firestore/Storage 권한 확보 (보안 규칙에 따라 필요)
-//    (사용자 로그인 기능이 없다면, 익명 로그인을 통해 간단히 권한을 얻습니다.)
-signInAnonymously(auth).catch((error) => {
-	console.error('Anonymous sign-in failed:', error);
-});
+// 4. Google Auth Provider 생성
+const googleProvider = new GoogleAuthProvider();
 
-export { db, storage, auth };
+// 5. 로그인/로그아웃 함수 생성
+const login = async () => {
+	try {
+		await signInWithPopup(auth, googleProvider);
+	} catch (error) {
+		console.error('Google 로그인 실패:', error);
+		throw error;
+	}
+};
+
+const logout = async () => {
+	try {
+		await signOut(auth);
+	} catch (error) {
+		console.error('로그아웃 실패:', error);
+		throw error;
+	}
+};
+
+// 6. Firebase 서비스 및 인증 함수 내보내기
+// onAuthStateChanged도 함께 내보내 Svelte 컴포넌트에서 인증 상태를 감지할 수 있게 합니다.
+export { db, storage, auth, onAuthStateChanged, login, logout };

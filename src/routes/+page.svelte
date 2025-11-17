@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
-	// Firebase 설정 파일 가져오기
-	import { db, storage } from '$lib/firebase.js';
+	// Firebase 설정 파일에서 auth 관련 함수들 추가로 가져오기
+	import { db, storage, auth, onAuthStateChanged, login, logout } from '$lib/firebase.js';
 
 	// Firebase SDK 함수들 가져오기
 	import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -22,18 +22,23 @@
 	let currentSong = null;
 	let isLoading = false;
 	let audioEl;
-	let statusMessage = '업로드할 음원을 선택하세요.';
+	let statusMessage = '플레이리스트 로딩 중...';
 
 	let isShuffle = false;
 	let playQueue = [];
 	let currentListIndex = -1;
 	let currentQueueIndex = -1;
 
-	// --- 1. Firestore에서 노래 목록 실시간 로드 ---
-	onMount(() => {
-		const q = query(collection(db, 'songs'), orderBy('order', 'asc'));
+	// --- 1. 인증 상태 변수 ---
+	let currentUser = null;
+	let isAdmin = false;
+	const ADMIN_EMAIL = 'cutiefunny@gmail.com'; // 관리자 이메일
 
-		const unsubscribe = onSnapshot(
+	// --- 2. Firestore 로드 및 Auth 상태 감지 ---
+	onMount(() => {
+		// Firestore 실시간 리스너
+		const q = query(collection(db, 'songs'), orderBy('order', 'asc'));
+		const unsubscribeFirestore = onSnapshot(
 			q,
 			(querySnapshot) => {
 				const songList = [];
@@ -53,14 +58,68 @@
 				statusMessage = '노래 목록을 불러오는 데 실패했습니다.';
 			}
 		);
-		return () => unsubscribe();
+
+		// Firebase Auth 상태 감지 리스너
+		const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+			currentUser = user;
+			isAdmin = user?.email === ADMIN_EMAIL;
+
+			if (user) {
+				if (isAdmin) {
+					statusMessage = '관리자님, 환영합니다. (파일 업로드 가능)';
+				} else {
+					statusMessage = '감상 모드';
+				}
+			} else {
+				statusMessage = '로그인하여 음악을 감상하세요. (관리자는 클릭)';
+			}
+		});
+
+		// 컴포넌트 파괴 시 리스너 정리
+		return () => {
+			unsubscribeFirestore();
+			unsubscribeAuth();
+		};
 	});
 
-	// --- ✅ 2. 파일 업로드 및 Firestore 저장 (다중 파일 처리로 수정) ---
+	// --- 3. 로그인/로그아웃 토글 함수 ---
+	async function handleAuthToggle() {
+		if (isLoading) return; // 로딩 중에는 실행 방지
+
+		if (currentUser) {
+			// 이미 로그인된 경우, 즉시 로그아웃
+			// [수정] confirm()은 샌드박스 환경에서 작동하지 않으므로 제거
+			isLoading = true;
+			statusMessage = '로그아웃 중...';
+			await logout();
+			// onAuthStateChanged가 statusMessage를 자동으로 업데이트합니다.
+			isLoading = false;
+		} else {
+			// 로그인되지 않은 경우, Google 로그인 시도
+			isLoading = true;
+			statusMessage = 'Google 계정으로 로그인 중...';
+			try {
+				await login();
+				// onAuthStateChanged가 statusMessage를 자동으로 업데이트합니다.
+			} catch (error) {
+				console.error('Login failed:', error);
+				statusMessage = '로그인에 실패했습니다.';
+			} finally {
+				isLoading = false;
+			}
+		}
+	}
+
+	// --- 4. 파일 업로드 및 Firestore 저장 (다중 파일 처리) ---
 	async function handleFileUpload(event) {
-		const files = event.target.files; // 단일 'file'이 아닌 'files' (FileList)
+		// (기존 코드와 동일)
+		const files = event.target.files;
 		if (!files || files.length === 0) {
-			return; // 선택된 파일 없음
+			return;
+		}
+		if (!isAdmin) {
+			statusMessage = '업로드 권한이 없습니다.';
+			return;
 		}
 
 		isLoading = true;
@@ -69,12 +128,9 @@
 		let errorCount = 0;
 
 		try {
-			// for...of 루프를 사용하여 파일 목록을 순차적으로 처리 (forEach는 await와 함께 사용 불가)
 			for (const file of files) {
 				const currentFileIndex = successCount + errorCount + 1;
 				statusMessage = `(${currentFileIndex}/${files.length}) '${file.name}' 처리 중...`;
-
-				// 개별 파일 업로드 로직 (개별 오류 처리를 위해 try...catch로 감쌈)
 				try {
 					const fileNameOnly = file.name.replace(/\.[^/.]+$/, '');
 					const parts = fileNameOnly.split(' - ');
@@ -91,9 +147,8 @@
 						src: downloadURL,
 						fileName: file.name,
 						createdAt: serverTimestamp(),
-						order: Date.now() // 순차적으로 order 값 부여
+						order: Date.now()
 					});
-
 					successCount++;
 				} catch (fileError) {
 					console.error(`'${file.name}' 업로드 실패:`, fileError);
@@ -101,19 +156,18 @@
 				}
 			}
 		} catch (batchError) {
-			// 루프 자체의 오류 (드물지만 방어 코드)
 			console.error('배치 업로드 중 예기치 않은 오류:', batchError);
 			statusMessage = '배치 업로드 중 심각한 오류 발생.';
 		} finally {
-			// 모든 파일 처리 완료 후
 			isLoading = false;
 			statusMessage = `업로드 완료: ${successCount}개 성공, ${errorCount}개 실패.`;
-			event.target.value = ''; // input 초기화
+			event.target.value = '';
 		}
 	}
 
-	// --- 3. 순서 변경 함수 ---
+	// --- 5. 순서 변경 함수 ---
 	async function moveSong(currentIndex, direction) {
+		if (!isAdmin) return; // 관리자만 실행
 		const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
 		if (newIndex < 0 || newIndex >= songs.length) return;
 		isLoading = true;
@@ -132,8 +186,9 @@
 		}
 	}
 
-	// --- 4. 셔플 배열 생성 (Fisher-Yates) ---
+	// --- 6. 셔플 배열 생성 (Fisher-Yates) ---
 	function getShuffledArray(array) {
+		// (기존 코드와 동일)
 		const newArr = [...array];
 		for (let i = newArr.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1));
@@ -142,10 +197,10 @@
 		return newArr;
 	}
 
-	// --- 5. 셔플 토글 함수 ---
+	// --- 7. 셔플 토글 함수 ---
 	function toggleShuffle() {
+		// (기존 코드와 동일)
 		isShuffle = !isShuffle;
-
 		if (isShuffle) {
 			const otherSongs = songs.filter((s) => s.id !== currentSong?.id);
 			const shuffledOtherSongs = getShuffledArray(otherSongs);
@@ -156,8 +211,9 @@
 		currentQueueIndex = currentSong ? playQueue.findIndex((s) => s.id === currentSong.id) : -1;
 	}
 
-	// --- 6. 노래 재생 ---
+	// --- 8. 노래 재생 ---
 	function playSong(song) {
+		// (기존 코드와 동일)
 		currentSong = song;
 		if (isShuffle) {
 			const otherSongs = songs.filter((s) => s.id !== song.id);
@@ -170,8 +226,9 @@
 		currentListIndex = songs.findIndex((s) => s.id === song.id);
 	}
 
-	// --- 7. 다음 곡/이전 곡 ---
+	// --- 9. 다음 곡/이전 곡 ---
 	function playNext() {
+		// (기존 코드와 동일)
 		if (playQueue.length === 0) return;
 		let nextIndex = currentQueueIndex + 1;
 		if (nextIndex >= playQueue.length) {
@@ -183,6 +240,7 @@
 	}
 
 	function playPrevious() {
+		// (기존 코드와 동일)
 		if (playQueue.length === 0) return;
 		let prevIndex = currentQueueIndex - 1;
 		if (prevIndex < 0) {
@@ -193,8 +251,9 @@
 		currentListIndex = songs.findIndex((s) => s.id === currentSong.id);
 	}
 
-	// --- 8. Media Session API 설정 ---
+	// --- 10. Media Session API 설정 ---
 	function setupMediaSession() {
+		// (기존 코드와 동일)
 		if (!('mediaSession' in navigator) || !currentSong) return;
 		const metadata = {
 			title: currentSong.title,
@@ -228,12 +287,15 @@
 		playNext();
 	}
 
-	// --- 9. 음원 삭제 기능 ---
+	// --- 11. 음원 삭제 기능 ---
 	async function deleteSong(songToDelete) {
+		if (!isAdmin) return; // 관리자만 실행
 		if (!songToDelete) return;
-		if (!confirm(`'${songToDelete.title}' 음원을 삭제하시겠습니까?`)) {
-			return;
-		}
+
+		// [수정] confirm()은 샌드박스 환경에서 작동하지 않으므로 제거
+		// if (!confirm(`'${songToDelete.title}' 음원을 삭제하시겠습니까?`)) {
+		// 	return;
+		// }
 		isLoading = true;
 		statusMessage = `'${songToDelete.title}' 삭제 중...`;
 		try {
@@ -267,23 +329,38 @@
 </script>
 
 <main>
-	<h1>🎵 SvelteKit 뮤직 플레이어</h1>
+	<!-- 
+		[수정] on:dblclick -> on:click (팝업 차단 방지)
+		[수정] title 텍스트 변경
+	-->
+	<h1 on:click={handleAuthToggle} title="관리자 로그인/로그아웃 (클릭)">
+		근육고양이 플레이리스트
+	</h1>
 
-	<div class="card">
-		<label for="file-upload" class="file-label" class:disabled={isLoading}>
-			{isLoading ? '처리 중...' : '음원 파일 선택'}
-		</label>
-		<input
-			id="file-upload"
-			type="file"
-			accept="audio/*"
-			on:change={handleFileUpload}
-			style="display: none;"
-			disabled={isLoading}
-			multiple
-		/>
-		<span class="statusMessage">{statusMessage}</span>
-	</div>
+	<!-- 
+		업로드 섹션(.card)은 관리자이거나 로그아웃 상태일 때만 표시됩니다.
+		(관리자: 업로드 컨트롤 / 로그아웃: 로그인 안내)
+		감상 모드(비-관리자 로그인)시에는 이 블록 전체가 숨겨집니다.
+	-->
+	{#if isAdmin || !currentUser}
+		<div class="card">
+			{#if isAdmin}
+				<label for="file-upload" class="file-label" class:disabled={isLoading}>
+					{isLoading ? '처리 중...' : '음원 파일 선택'}
+				</label>
+				<input
+					id="file-upload"
+					type="file"
+					accept="audio/*"
+					on:change={handleFileUpload}
+					style="display: none;"
+					disabled={isLoading}
+					multiple
+				/>
+			{/if}
+			<span class="statusMessage">{statusMessage}</span>
+		</div>
+	{/if}
 
 	{#if currentSong}
 		<div class="player-wrapper">
@@ -328,26 +405,31 @@
 			<ul>
 				{#each songs as song, index (song.id)}
 					<li class:playing={currentListIndex === index}>
-						<div class="move-controls">
-							<button
-								type="button"
-								class="move-button"
-								on:click={() => moveSong(index, 'up')}
-								disabled={index === 0 || isLoading}
-								aria-label="위로 이동"
-							>
-								🔼
-							</button>
-							<button
-								type="button"
-								class="move-button"
-								on:click={() => moveSong(index, 'down')}
-								disabled={index === songs.length - 1 || isLoading}
-								aria-label="아래로 이동"
-							>
-								🔽
-							</button>
-						</div>
+						<!-- 
+							순서 변경 컨트롤은 관리자에게만 보입니다.
+						-->
+						{#if isAdmin}
+							<div class="move-controls">
+								<button
+									type="button"
+									class="move-button"
+									on:click={() => moveSong(index, 'up')}
+									disabled={index === 0 || isLoading}
+									aria-label="위로 이동"
+								>
+									🔼
+								</button>
+								<button
+									type="button"
+									class="move-button"
+									on:click={() => moveSong(index, 'down')}
+									disabled={index === songs.length - 1 || isLoading}
+									aria-label="아래로 이동"
+								>
+									🔽
+								</button>
+							</div>
+						{/if}
 
 						<button
 							type="button"
@@ -360,15 +442,21 @@
 								<span class="artist">{song.artist}</span>
 							</div>
 						</button>
-						<button
-							type="button"
-							class="delete-button"
-							on:click={() => deleteSong(song)}
-							disabled={isLoading}
-							aria-label="Delete {song.title}"
-						>
-							&times;
-						</button>
+
+						<!-- 
+							삭제 버튼은 관리자에게만 보입니다.
+						-->
+						{#if isAdmin}
+							<button
+								type="button"
+								class="delete-button"
+								on:click={() => deleteSong(song)}
+								disabled={isLoading}
+								aria-label="Delete {song.title}"
+							>
+								&times;
+							</button>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -396,6 +484,12 @@
 	}
 	h1 {
 		color: #40c9a9;
+		/* 클릭 가능하도록 커서 변경 및 텍스트 선택 방지 */
+		cursor: pointer;
+		user-select: none;
+		-webkit-user-select: none; /* Safari */
+		-moz-user-select: none; /* Firefox */
+		-ms-user-select: none; /* IE */
 	}
 	.card {
 		background-color: #1e1e1e;
@@ -403,6 +497,12 @@
 		padding: 1.5rem;
 		margin-bottom: 1.5rem;
 		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+		/* 상태 메시지만 있을 경우를 대비해 최소 높이 설정 */
+		min-height: 50px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		align-items: center;
 	}
 	.file-label {
 		background-color: #40c9a9;
@@ -425,6 +525,14 @@
 		margin-top: 1rem;
 		color: #a0a0a0;
 		font-style: italic;
+	}
+	/* 업로드 버튼이 있을 때만 margin-top 적용 */
+	.file-label + .statusMessage {
+		margin-top: 1rem;
+	}
+	/* 업로드 버튼이 없을 때는 statusMessage가 중앙에 오도록 margin-top 제거 */
+	:not(.file-label) + .statusMessage {
+		margin-top: 0;
 	}
 
 	/* --- 플레이어 --- */
@@ -544,7 +652,18 @@
 		text-align: left;
 		color: inherit;
 		flex-grow: 1;
+		/* 관리자 컨트롤이 없을 때 왼쪽 정렬을 맞추기 위한 최소한의 패딩 */
+		padding-left: 0.75rem;
 	}
+	/* 관리자 컨트롤이 있을 때 song-button의 왼쪽 패딩은 기본값 */
+	.move-controls + .song-button {
+		padding-left: 0.75rem;
+	}
+	/* 관리자 컨트롤이 없을 때 song-button의 왼쪽 패딩을 늘려 정렬 맞춤 */
+	li:not(:has(.move-controls)) .song-button {
+		padding-left: 1.7rem; /* .move-controls의 대략적인 너비 + 패딩 */
+	}
+
 	.song-button:hover {
 		background-color: #2a2a2a;
 	}
