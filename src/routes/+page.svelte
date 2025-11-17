@@ -65,7 +65,8 @@
 					statusMessage = '감상 모드';
 				}
 			} else {
-				statusMessage = '로그인하여 음악을 감상하세요. (관리자는 클릭)';
+				// [수정] 로그아웃 시 statusMessage 변경 (섹션이 숨겨지므로 영향은 없음)
+				statusMessage = '로그아웃 상태입니다.';
 			}
 		});
 
@@ -112,7 +113,7 @@
 		// --- 상태 메시지 업데이트 ---
 		if (isAdmin) statusMessage = '관리자 모드';
 		else if (currentUser) statusMessage = '감상 모드';
-		else statusMessage = '로그인 필요';
+		else statusMessage = '로그아웃 상태'; // [수정]
 	}
 
 	// --- 7. [신규] Firestore 구독 로직 함수 ---
@@ -160,7 +161,7 @@
 			};
 		} else if (branch === 'branch2') {
 			// --- 2호점 로직 (병합) ---
-			statusMessage = '2호점 목록 로딩 중...';
+			statusMessage = '2호점 (기존 곡 포함) 목록 로딩 중...';
 
 			// 리스너 1: 'libraries/branch2/songs' (신규 2호점 곡)
 			const qBranch2 = query(
@@ -241,12 +242,12 @@
 			isLoading = false;
 		} else {
 			isLoading = true;
-			statusMessage = 'Google 계정으로 로그인 중...';
+			statusMessage = 'Google 계정으로 로그인 중...'; // 이 메시지는 이제 보이지 않음
 			try {
 				await login();
 			} catch (error) {
 				console.error('Login failed:', error);
-				statusMessage = '로그인에 실패했습니다.';
+				statusMessage = '로그인에 실패했습니다.'; // 이 메시지도 보이지 않음
 			} finally {
 				isLoading = false;
 			}
@@ -534,7 +535,8 @@
 	</div>
 
 	<!-- 업로드 섹션 -->
-	{#if isAdmin || !currentUser}
+	<!-- [수정] {#if isAdmin} 으로 변경. 관리자일 때만 이 섹션이 보입니다. -->
+	{#if isAdmin}
 		<div class="card">
 			{#if isAdmin}
 				<label for="file-upload" class="file-label" class:disabled={isLoading}>
@@ -582,7 +584,7 @@
 		<div class="playlist-header">
 			<h2 class="library-title">
 				<!-- [수정] 2호점 타이틀 변경 -->
-				{currentBranch === 'branch1' ? '1호점' : '2호점'}
+				{currentBranch === 'branch1' ? '1호점' : '2호점 (기존 곡 포함)'}
 			</h2>
 			<button
 				type="button"
