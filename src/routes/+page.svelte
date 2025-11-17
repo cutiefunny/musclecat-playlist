@@ -160,7 +160,7 @@
 			};
 		} else if (branch === 'branch2') {
 			// --- 2호점 로직 (병합) ---
-			statusMessage = '2호점 (기존 곡 포함) 목록 로딩 중...';
+			statusMessage = '2호점 목록 로딩 중...';
 
 			// 리스너 1: 'libraries/branch2/songs' (신규 2호점 곡)
 			const qBranch2 = query(
@@ -582,7 +582,7 @@
 		<div class="playlist-header">
 			<h2 class="library-title">
 				<!-- [수정] 2호점 타이틀 변경 -->
-				{currentBranch === 'branch1' ? '1호점' : '2호점 (기존 곡 포함)'}
+				{currentBranch === 'branch1' ? '1호점' : '2호점'}
 			</h2>
 			<button
 				type="button"
