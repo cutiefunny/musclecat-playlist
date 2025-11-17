@@ -34,39 +34,21 @@
 	let isAdmin = false;
 	const ADMIN_EMAIL = 'cutiefunny@gmail.com'; // 관리자 이메일
 
-	// --- 2. 수정 상태 변수 (신규) ---
+	// --- 2. 수정 상태 변수 ---
 	let editingSongId = null; // 현재 수정 중인 곡의 ID
 	let editTitle = ''; // 수정 중인 제목
 	let editArtist = ''; // 수정 중인 아티스트
 
-	// --- 3. Firestore 로드 및 Auth 상태 감지 ---
+	// --- 3. 지점(Branch) 상태 변수 ---
+	let currentBranch = 'branch2'; // 'branch1' 또는 'branch2'
+	let unsubscribeFirestore = () => {}; // Firestore 리스너 해제 함수
+
+	// [신규] 리스너가 채울 목록 (최상위로 이동)
+	let branchSongsList = []; // 'libraries/branchX/songs' 목록
+	let oldSongsList = []; // 'songs' (기존) 목록
+
+	// --- 4. Auth 상태 감지 (onMount) ---
 	onMount(() => {
-		// Firestore 실시간 리스너
-		const q = query(collection(db, 'songs'), orderBy('order', 'asc'));
-		const unsubscribeFirestore = onSnapshot(
-			q,
-			(querySnapshot) => {
-				const songList = [];
-				querySnapshot.forEach((doc) => {
-					songList.push({ id: doc.id, ...doc.data() });
-				});
-				songs = songList;
-
-				// 수정 중이었다면 목록 새로고침 시 수정 모드 해제
-				cancelEdit();
-
-				if (!isShuffle) {
-					playQueue = [...songs];
-					currentQueueIndex = currentSong ? playQueue.findIndex((s) => s.id === currentSong.id) : -1;
-				}
-				currentListIndex = currentSong ? songs.findIndex((s) => s.id === currentSong.id) : -1;
-			},
-			(error) => {
-				console.error('Error loading songs:', error);
-				statusMessage = '노래 목록을 불러오는 데 실패했습니다.';
-			}
-		);
-
 		// Firebase Auth 상태 감지 리스너
 		const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
 			currentUser = user;
@@ -89,23 +71,175 @@
 
 		// 컴포넌트 파괴 시 리스너 정리
 		return () => {
-			unsubscribeFirestore();
-			unsubscribeAuth();
+			unsubscribeFirestore(); // 데이터 리스너
+			unsubscribeAuth(); // 인증 리스너
 		};
 	});
 
-	// --- 4. 로그인/로그아웃 토글 함수 ---
-	async function handleAuthToggle() {
-		if (isLoading) return; // 로딩 중에는 실행 방지
+	// --- 5. [신규] 곡 문서 경로 헬퍼 ---
+	/**
+	 * 곡 객체의 isOld 플래그를 기반으로 올바른 Firestore 문서 참조를 반환합니다.
+	 * isOld: true -> 'songs/{id}'
+	 * isOld: false -> 'libraries/{currentBranch}/songs/{id}'
+	 */
+	function getSongDocRef(song) {
+		if (song.isOld) {
+			return doc(db, 'songs', song.id);
+		} else {
+			// new song (branch1 or branch2)
+			return doc(db, 'libraries', currentBranch, 'songs', song.id);
+		}
+	}
 
+	// --- 6. [신규] 목록 병합 및 상태 업데이트 함수 (최상위로 이동) ---
+	// (onSnapshot 콜백에서 이 함수를 호출)
+	function updateMergedList() {
+		const combined = [...branchSongsList, ...oldSongsList];
+
+		// [중요] 두 컬렉션을 합쳤으므로 클라이언트에서 'order' 기준으로 다시 정렬
+		combined.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+		songs = combined; // 메인 상태 업데이트
+
+		// --- 목록 변경에 따른 후속 상태 업데이트 ---
+		cancelEdit(); // 목록 새로고침 시 수정 모드 해제
+		if (!isShuffle) {
+			playQueue = [...songs];
+			currentQueueIndex = currentSong ? playQueue.findIndex((s) => s.id === currentSong.id) : -1;
+		}
+		currentListIndex = currentSong ? songs.findIndex((s) => s.id === currentSong.id) : -1;
+
+		// --- 상태 메시지 업데이트 ---
+		if (isAdmin) statusMessage = '관리자 모드';
+		else if (currentUser) statusMessage = '감상 모드';
+		else statusMessage = '로그인 필요';
+	}
+
+	// --- 7. [신규] Firestore 구독 로직 함수 ---
+	function subscribeToBranch(branch) {
+		// db가 아직 초기화되지 않았으면 실행 중지
+		if (!db) return;
+
+		// 1. 기존 리스너가 있다면 모두 해제
+		unsubscribeFirestore();
+
+		let unsubBranchSongs = () => {};
+		let unsubOldSongs = () => {};
+
+		// 2. 목록 변수 초기화
+		branchSongsList = [];
+		oldSongsList = [];
+
+		if (branch === 'branch1') {
+			// --- 1호점 로직 (단일 컬렉션) ---
+			statusMessage = '1호점 목록 로딩 중...';
+			const q = query(
+				collection(db, 'libraries', 'branch1', 'songs'),
+				orderBy('order', 'asc')
+			);
+
+			unsubBranchSongs = onSnapshot(
+				q,
+				(querySnapshot) => {
+					branchSongsList = []; // 1호점 목록 채우기
+					querySnapshot.forEach((doc) => {
+						branchSongsList.push({ id: doc.id, ...doc.data(), isOld: false });
+					});
+					oldSongsList = []; // 1호점일 땐 기존 곡 목록 비움
+					updateMergedList(); // 병합 및 정렬
+				},
+				(error) => {
+					console.error('Error loading branch 1 songs:', error);
+					statusMessage = '1호점 목록을 불러오는 데 실패했습니다.';
+				}
+			);
+
+			// 1호점은 리스너가 1개
+			unsubscribeFirestore = () => {
+				unsubBranchSongs();
+			};
+		} else if (branch === 'branch2') {
+			// --- 2호점 로직 (병합) ---
+			statusMessage = '2호점 (기존 곡 포함) 목록 로딩 중...';
+
+			// 리스너 1: 'libraries/branch2/songs' (신규 2호점 곡)
+			const qBranch2 = query(
+				collection(db, 'libraries', 'branch2', 'songs'),
+				orderBy('order', 'asc') // (부분 정렬)
+			);
+			unsubBranchSongs = onSnapshot(
+				qBranch2,
+				(querySnapshot) => {
+					branchSongsList = [];
+					querySnapshot.forEach((doc) => {
+						branchSongsList.push({ id: doc.id, ...doc.data(), isOld: false });
+					});
+					updateMergedList(); // (oldSongsList와) 병합 및 정렬
+				},
+				(error) => {
+					console.error('Error loading branch 2 songs:', error);
+					statusMessage = '2호점 신규 목록 로딩 실패.';
+				}
+			);
+
+			// 리스너 2: 'songs' (기존 곡)
+			const qOld = query(collection(db, 'songs'), orderBy('order', 'asc')); // (부분 정렬)
+
+			unsubOldSongs = onSnapshot(
+				qOld,
+				(querySnapshot) => {
+					oldSongsList = [];
+					querySnapshot.forEach((doc) => {
+						oldSongsList.push({ id: doc.id, ...doc.data(), isOld: true });
+					});
+					updateMergedList(); // (branchSongsList와) 병합 및 정렬
+				},
+				(error) => {
+					console.error('Error loading OLD songs:', error);
+					statusMessage = '2호점 기존 목록 로딩 실패.';
+				}
+			);
+
+			// 2호점은 리스너가 2개이므로, 둘 다 해제하는 함수를 만듦
+			unsubscribeFirestore = () => {
+				unsubBranchSongs();
+				unsubOldSongs();
+			};
+		}
+	}
+
+	// --- 8. [수정] 반응형 구독 실행 ---
+	// currentBranch가 변경될 때만 subscribeToBranch 함수를 호출 (무한 루프 방지)
+	$: subscribeToBranch(currentBranch);
+
+	// --- 9. 지점(Branch) 전환 함수 ---
+	function switchBranch(branchId) {
+		if (branchId === currentBranch || isLoading || editingSongId) {
+			return;
+		}
+		currentBranch = branchId;
+
+		// 지점 변경 시 플레이어 및 상태 초기화
+		currentSong = null;
+		if (audioEl) {
+			audioEl.pause();
+			audioEl.src = '';
+		}
+		songs = []; // :$ 블록이 자동으로 다시 채울 것임
+		playQueue = [];
+		currentListIndex = -1;
+		currentQueueIndex = -1;
+	}
+
+	// --- 10. 로그인/로그아웃 토글 함수 ---
+	async function handleAuthToggle() {
+		if (isLoading || editingSongId) return; // 수정 중일 때 방지
 		if (currentUser) {
-			// 이미 로그인된 경우, 즉시 로그아웃
 			isLoading = true;
 			statusMessage = '로그아웃 중...';
 			await logout();
 			isLoading = false;
 		} else {
-			// 로그인되지 않은 경우, Google 로그인 시도
 			isLoading = true;
 			statusMessage = 'Google 계정으로 로그인 중...';
 			try {
@@ -119,20 +253,19 @@
 		}
 	}
 
-	// --- 5. 파일 업로드 및 Firestore 저장 (다중 파일 처리) ---
+	// --- 11. 파일 업로드 ---
 	async function handleFileUpload(event) {
-		// (기존 코드와 동일)
 		const files = event.target.files;
-		if (!files || files.length === 0) {
-			return;
-		}
+		if (!files || files.length === 0) return;
 		if (!isAdmin) {
 			statusMessage = '업로드 권한이 없습니다.';
 			return;
 		}
 
 		isLoading = true;
-		statusMessage = `${files.length}개 파일 업로드 시작...`;
+		statusMessage = `${files.length}개 파일 업로드 시작... (${
+			currentBranch === 'branch1' ? '1호점' : '2호점'
+		}에 저장)`;
 		let successCount = 0;
 		let errorCount = 0;
 
@@ -151,7 +284,8 @@
 					const snapshot = await uploadBytes(storageRef, file);
 					const downloadURL = await getDownloadURL(snapshot.ref);
 
-					await addDoc(collection(db, 'songs'), {
+					// 2호점 선택 시 currentBranch='branch2'이므로 'libraries/branch2/songs'에 저장됨
+					await addDoc(collection(db, 'libraries', currentBranch, 'songs'), {
 						...metadata,
 						src: downloadURL,
 						fileName: file.name,
@@ -174,17 +308,19 @@
 		}
 	}
 
-	// --- 6. 순서 변경 함수 ---
+	// --- 12. 순서 변경 함수 ---
 	async function moveSong(currentIndex, direction) {
-		if (!isAdmin || editingSongId) return; // 관리자만, 수정 중이 아닐 때만
+		if (!isAdmin || editingSongId) return;
 		const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
 		if (newIndex < 0 || newIndex >= songs.length) return;
 		isLoading = true;
 		try {
 			const songA = songs[currentIndex];
 			const songB = songs[newIndex];
-			const docRefA = doc(db, 'songs', songA.id);
-			const docRefB = doc(db, 'songs', songB.id);
+
+			const docRefA = getSongDocRef(songA);
+			const docRefB = getSongDocRef(songB);
+
 			await updateDoc(docRefA, { order: songB.order });
 			await updateDoc(docRefB, { order: songA.order });
 		} catch (error) {
@@ -195,23 +331,19 @@
 		}
 	}
 
-	// --- 7. 수정 관련 함수 (신규) ---
-
-	/** 수정 모드 시작 */
+	// --- 13. 수정 관련 함수 ---
 	function startEdit(song) {
 		editingSongId = song.id;
 		editTitle = song.title;
 		editArtist = song.artist;
 	}
 
-	/** 수정 모드 취소 */
 	function cancelEdit() {
 		editingSongId = null;
 		editTitle = '';
 		editArtist = '';
 	}
 
-	/** 수정 내용 저장 */
 	async function saveEdit(songId) {
 		if (!isAdmin || !editingSongId || songId !== editingSongId) return;
 		if (!editTitle.trim() || !editArtist.trim()) {
@@ -223,7 +355,10 @@
 		statusMessage = '정보 업데이트 중...';
 
 		try {
-			const docRef = doc(db, 'songs', songId);
+			const songToSave = songs.find((s) => s.id === songId);
+			if (!songToSave) throw new Error('Song not found in list.');
+
+			const docRef = getSongDocRef(songToSave);
 			await updateDoc(docRef, {
 				title: editTitle.trim(),
 				artist: editArtist.trim()
@@ -238,9 +373,8 @@
 		}
 	}
 
-	// --- 8. 셔플 배열 생성 (Fisher-Yates) ---
+	// --- 14. 셔플, 재생, 다음/이전 (로직 동일) ---
 	function getShuffledArray(array) {
-		// (기존 코드와 동일)
 		const newArr = [...array];
 		for (let i = newArr.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1));
@@ -249,9 +383,7 @@
 		return newArr;
 	}
 
-	// --- 9. 셔플 토글 함수 ---
 	function toggleShuffle() {
-		// (기존 코드와 동일)
 		isShuffle = !isShuffle;
 		if (isShuffle) {
 			const otherSongs = songs.filter((s) => s.id !== currentSong?.id);
@@ -263,10 +395,8 @@
 		currentQueueIndex = currentSong ? playQueue.findIndex((s) => s.id === currentSong.id) : -1;
 	}
 
-	// --- 10. 노래 재생 ---
 	function playSong(song) {
-		if (editingSongId) return; // 수정 중에는 재생 방지
-		// (기존 코드와 동일)
+		if (editingSongId) return;
 		currentSong = song;
 		if (isShuffle) {
 			const otherSongs = songs.filter((s) => s.id !== song.id);
@@ -279,9 +409,7 @@
 		currentListIndex = songs.findIndex((s) => s.id === song.id);
 	}
 
-	// --- 11. 다음 곡/이전 곡 ---
 	function playNext() {
-		// (기존 코드와 동일)
 		if (playQueue.length === 0) return;
 		let nextIndex = currentQueueIndex + 1;
 		if (nextIndex >= playQueue.length) {
@@ -293,7 +421,6 @@
 	}
 
 	function playPrevious() {
-		// (기존 코드와 동일)
 		if (playQueue.length === 0) return;
 		let prevIndex = currentQueueIndex - 1;
 		if (prevIndex < 0) {
@@ -304,9 +431,8 @@
 		currentListIndex = songs.findIndex((s) => s.id === currentSong.id);
 	}
 
-	// --- 12. Media Session API 설정 ---
+	// --- 15. Media Session API (로직 동일) ---
 	function setupMediaSession() {
-		// (기존 코드와 동일)
 		if (!('mediaSession' in navigator) || !currentSong) return;
 		const metadata = {
 			title: currentSong.title,
@@ -340,14 +466,15 @@
 		playNext();
 	}
 
-	// --- 13. 음원 삭제 기능 ---
+	// --- 16. 음원 삭제 기능 ---
 	async function deleteSong(songToDelete) {
-		if (!isAdmin || editingSongId) return; // 관리자만, 수정 중이 아닐 때만
+		if (!isAdmin || editingSongId) return;
 		if (!songToDelete) return;
 
 		isLoading = true;
 		statusMessage = `'${songToDelete.title}' 삭제 중...`;
 		try {
+			// 큐(Queue)에서 제거
 			const queueIndex = playQueue.findIndex((s) => s.id === songToDelete.id);
 			if (queueIndex > -1) {
 				playQueue.splice(queueIndex, 1);
@@ -361,11 +488,17 @@
 				currentQueueIndex = -1;
 				currentListIndex = -1;
 			}
-			const docRef = doc(db, 'songs', songToDelete.id);
+
+			// Firestore 문서 경로 가져오기
+			const docRef = getSongDocRef(songToDelete);
+
+			// Storage 삭제
 			if (songToDelete.src) {
 				const audioRef = ref(storage, songToDelete.src);
 				await deleteObject(audioRef);
 			}
+
+			// Firestore 문서 삭제
 			await deleteDoc(docRef);
 			statusMessage = `'${songToDelete.title}' 삭제 완료.`;
 		} catch (error) {
@@ -378,19 +511,29 @@
 </script>
 
 <main>
-	<!-- 
-		[수정] on:dblclick -> on:click (팝업 차단 방지)
-		[수정] title 텍스트 변경
-	-->
 	<h1 on:click={handleAuthToggle} title="관리자 로그인/로그아웃 (클릭)">
 		근육고양이 플레이리스트
 	</h1>
 
-	<!-- 
-		업로드 섹션(.card)은 관리자이거나 로그아웃 상태일 때만 표시됩니다.
-		(관리자: 업로드 컨트롤 / 로그아웃: 로그인 안내)
-		감상 모드(비-관리자 로그인)시에는 이 블록 전체가 숨겨집니다.
-	-->
+	<!-- 지점(Branch) 선택 UI -->
+	<div class="branch-selector">
+		<button
+			class:active={currentBranch === 'branch1'}
+			on:click={() => switchBranch('branch1')}
+			disabled={isLoading || editingSongId}
+		>
+			1호점 라이브러리
+		</button>
+		<button
+			class:active={currentBranch === 'branch2'}
+			on:click={() => switchBranch('branch2')}
+			disabled={isLoading || editingSongId}
+		>
+			2호점 라이브러리
+		</button>
+	</div>
+
+	<!-- 업로드 섹션 -->
 	{#if isAdmin || !currentUser}
 		<div class="card">
 			{#if isAdmin}
@@ -411,6 +554,7 @@
 		</div>
 	{/if}
 
+	<!-- 플레이어 -->
 	{#if currentSong}
 		<div class="player-wrapper">
 			<div class="player-info">
@@ -428,7 +572,7 @@
 					on:pause={onPause}
 					on:ended={onEnded}
 				>
-					<p>お使いのブラウザは audio 要素をサポートしていません。</p>
+					<p>お使い의 ブラウザは audio 要素를 지원하지 않습니다.</p>
 				</audio>
 			</div>
 		</div>
@@ -436,7 +580,10 @@
 
 	<div class="playlist-wrapper">
 		<div class="playlist-header">
-			<h2>내 라이브러리</h2>
+			<h2 class="library-title">
+				<!-- [수정] 2호점 타이틀 변경 -->
+				{currentBranch === 'branch1' ? '1호점' : '2호점 (기존 곡 포함)'}
+			</h2>
 			<button
 				type="button"
 				class="shuffle-button"
@@ -448,15 +595,13 @@
 			</button>
 		</div>
 
+		<!-- 플레이리스트 목록 -->
 		{#if songs.length === 0 && !isLoading}
 			<p>업로드된 음원이 없습니다.</p>
 		{:else}
 			<ul>
 				{#each songs as song, index (song.id)}
 					<li class:playing={currentListIndex === index}>
-						<!-- 
-							[수정] 순서 변경 컨트롤 (수정 중이 아닐 때만)
-						-->
 						{#if isAdmin}
 							<div class="move-controls">
 								<button
@@ -480,11 +625,7 @@
 							</div>
 						{/if}
 
-						<!-- 
-							[수정] 수정 모드에 따른 분기 처리
-						-->
 						{#if editingSongId === song.id}
-							<!-- 1. 수정 모드일 때 (관리자 전용) -->
 							<form class="edit-form" on:submit|preventDefault={() => saveEdit(song.id)}>
 								<input
 									type="text"
@@ -511,7 +652,6 @@
 								</button>
 							</form>
 						{:else}
-							<!-- 2. 기본 표시 모드일 때 -->
 							<button
 								type="button"
 								class="song-button"
@@ -522,10 +662,13 @@
 								<div class="song-info">
 									<span class="title">{song.title}</span>
 									<span class="artist">{song.artist}</span>
+									<!-- [신규] 2호점에서만 '기존 곡'인지 표시 (관리자 디버깅용) -->
+									{#if isAdmin && currentBranch === 'branch2' && song.isOld}
+										<span class="old-tag">(기존 곡)</span>
+									{/if}
 								</div>
 							</button>
 
-							<!-- 3. 관리자 컨트롤 (수정/삭제) -->
 							{#if isAdmin}
 								<div class="admin-controls">
 									<button
@@ -562,10 +705,9 @@
 			'Open Sans', 'Helvetica Neue', sans-serif;
 		background-color: #121212;
 		color: #e0e0e0;
-		display: grid;
-		place-items: center;
-		min-height: 100vh;
 		margin: 0;
+		overflow: hidden;
+		height: 100vh;
 	}
 	main {
 		max-width: 600px;
@@ -573,28 +715,67 @@
 		padding: 1rem;
 		box-sizing: border-box;
 		text-align: center;
+		height: 100vh;
+		margin: 0 auto;
+		display: flex;
+		flex-direction: column;
 	}
 	h1 {
 		color: #40c9a9;
-		/* 클릭 가능하도록 커서 변경 및 텍스트 선택 방지 */
 		cursor: pointer;
 		user-select: none;
-		-webkit-user-select: none; /* Safari */
-		-moz-user-select: none; /* Firefox */
-		-ms-user-select: none; /* IE */
+		-webkit-user-select: none;
+		-moz-user-select: none;
+		-ms-user-select: none;
+		flex-shrink: 0;
+		margin-bottom: 0.5rem;
 	}
+
+	/* --- 지점 선택기 --- */
+	.branch-selector {
+		display: flex;
+		justify-content: center;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+		flex-shrink: 0;
+	}
+	.branch-selector button {
+		background-color: #333;
+		color: #aaa;
+		border: 2px solid #555;
+		border-radius: 20px;
+		padding: 0.5rem 1rem;
+		font-size: 0.9rem;
+		font-weight: bold;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+	.branch-selector button:hover:not(:disabled) {
+		background-color: #444;
+		border-color: #777;
+	}
+	.branch-selector button.active {
+		background-color: #40c9a9;
+		color: #121212;
+		border-color: #40c9a9;
+	}
+	.branch-selector button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
 	.card {
 		background-color: #1e1e1e;
 		border-radius: 8px;
 		padding: 1.5rem;
 		margin-bottom: 1.5rem;
 		box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-		/* 상태 메시지만 있을 경우를 대비해 최소 높이 설정 */
 		min-height: 50px;
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
 		align-items: center;
+		flex-shrink: 0;
 	}
 	.file-label {
 		background-color: #40c9a9;
@@ -618,11 +799,9 @@
 		color: #a0a0a0;
 		font-style: italic;
 	}
-	/* 업로드 버튼이 있을 때만 margin-top 적용 */
 	.file-label + .statusMessage {
 		margin-top: 1rem;
 	}
-	/* 업로드 버튼이 없을 때는 statusMessage가 중앙에 오도록 margin-top 제거 */
 	:not(.file-label) + .statusMessage {
 		margin-top: 0;
 	}
@@ -633,32 +812,17 @@
 		background-color: #2a2a2a;
 		padding: 1rem;
 		border-radius: 8px;
-	}
-	.player-info {
-		width: 100%;
-		text-align: left;
-	}
-	.now-playing {
-		margin: 0 0 0.5rem 0;
-	}
-	.now-playing strong {
-		color: #40c9a9;
-		display: block;
-		font-size: 1.1rem;
-	}
-	.now-playing span {
-		font-size: 0.9rem;
-		color: #aaa;
-	}
-	audio {
-		width: 100%;
-		border-radius: 5px;
+		flex-shrink: 0;
+		margin-bottom: 1rem;
 	}
 
 	/* --- 플레이리스트 --- */
 	.playlist-wrapper {
-		margin-top: 2rem;
 		text-align: left;
+		flex-grow: 1;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
 	}
 	.playlist-header {
 		display: flex;
@@ -666,6 +830,7 @@
 		align-items: center;
 		border-bottom: 2px solid #333;
 		padding-bottom: 0.5rem;
+		flex-shrink: 0;
 	}
 	.playlist-header h2 {
 		margin: 0;
@@ -694,8 +859,9 @@
 		list-style: none;
 		padding: 0;
 		margin: 0;
-		max-height: 40vh;
+		flex-grow: 1;
 		overflow-y: auto;
+		min-height: 0;
 	}
 	.playlist-wrapper li {
 		border-bottom: 1px solid #2a2a2a;
@@ -744,16 +910,13 @@
 		text-align: left;
 		color: inherit;
 		flex-grow: 1;
-		/* 관리자 컨트롤이 없을 때 왼쪽 정렬을 맞추기 위한 최소한의 패딩 */
 		padding-left: 0.75rem;
 	}
-	/* 관리자 컨트롤이 있을 때 song-button의 왼쪽 패딩은 기본값 */
 	.move-controls + .song-button {
 		padding-left: 0.75rem;
 	}
-	/* 관리자 컨트롤이 없을 때 song-button의 왼쪽 패딩을 늘려 정렬 맞춤 */
 	li:not(:has(.move-controls)) .song-button {
-		padding-left: 1.7rem; /* .move-controls의 대략적인 너비 + 패딩 */
+		padding-left: 1.7rem;
 	}
 
 	.song-button:hover {
@@ -780,8 +943,16 @@
 		font-size: 0.9rem;
 		color: #a0a0a0;
 	}
+	/* [신규] 기존 곡 태그 */
+	.old-tag {
+		display: inline-block;
+		font-size: 0.75rem;
+		color: #888;
+		margin-left: 0.5rem;
+		font-style: italic;
+	}
 
-	/* --- [신규] 수정 폼 스타일 --- */
+	/* --- 수정 폼 스타일 --- */
 	.edit-form {
 		display: flex;
 		flex-grow: 1;
@@ -791,7 +962,7 @@
 	}
 	.edit-input {
 		flex-grow: 1;
-		width: 30%; /* 유연한 너비 */
+		width: 30%;
 		background-color: #333;
 		color: #e0e0e0;
 		border: 1px solid #555;
@@ -804,7 +975,7 @@
 		outline: none;
 	}
 
-	/* --- [신규] 관리자 컨트롤 (수정/삭제) --- */
+	/* --- 관리자 컨트롤 (수정/삭제) --- */
 	.admin-controls {
 		display: flex;
 		align-items: stretch;
