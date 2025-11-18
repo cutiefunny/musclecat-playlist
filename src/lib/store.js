@@ -26,6 +26,9 @@ import {
 	orderBy
 } from 'firebase/firestore';
 
+// [신규] 캐시 모듈 임포트
+import { getCachedAudio, cacheAudio } from '$lib/cache.js';
+
 // --- 1. 상태 변수 (Writables) ---
 export const isLoading = writable(false);
 export const statusMessage = writable('플레이리스트 로딩 중...');
@@ -55,11 +58,14 @@ export const editArtist = writable('');
 // 재생 상태
 export const currentSong = writable(null);
 export const isShuffle = writable(false);
-// [신규] 반복 모드 상태 (0: 반복 없음, 1: 전체 반복, 2: 한 곡 반복)
-export const repeatMode = writable(1); // 기본값: 전체 반복
+// 반복 모드 상태 (0: 반복 없음, 1: 전체 반복, 2: 한 곡 반복)
+export const repeatMode = writable(1);
 export const playQueue = writable([]);
 export const currentListIndex = writable(-1);
 export const currentQueueIndex = writable(-1);
+
+// [신규] Blob URL 메모리 관리를 위한 변수
+let activeBlobUrl = null;
 
 // --- 2. 내부 헬퍼 함수 (비공개) ---
 let _get;
@@ -114,6 +120,57 @@ function getSongDocRef(song) {
 	} else {
 		const $currentBranch = get(currentBranch);
 		return doc(db, 'libraries', $currentBranch, 'songs', song.id);
+	}
+}
+
+// [신규] 통합 재생 헬퍼 함수 (캐시 로직 포함)
+async function loadAndPlaySong(song) {
+	if (!song) return;
+
+	// 1. 이전 Blob URL 해제 (메모리 누수 방지)
+	if (activeBlobUrl) {
+		URL.revokeObjectURL(activeBlobUrl);
+		activeBlobUrl = null;
+	}
+
+	// 2. 로컬 캐시 확인
+	const cachedBlob = await getCachedAudio(song.id);
+	let playSrc = song.src;
+	let isCached = false;
+
+	if (cachedBlob) {
+		console.log(`[Cache] Playing from local DB: ${song.title}`);
+		activeBlobUrl = URL.createObjectURL(cachedBlob);
+		playSrc = activeBlobUrl;
+		isCached = true;
+	} else {
+		console.log(`[Cache] Not found locally. Playing remote & downloading: ${song.title}`);
+		// 캐시에 없으면 백그라운드 다운로드 시작
+		downloadToCache(song);
+	}
+
+	// 3. currentSong 업데이트 (src를 로컬 Blob URL 혹은 원격 URL로 설정)
+	// 원본 song 객체의 src는 보존하고, 재생용 임시 객체를 생성
+	currentSong.set({
+		...song,
+		src: playSrc,
+		_isLocal: isCached // UI 표시용 플래그 (옵션)
+	});
+}
+
+// [신규] 백그라운드 다운로드 및 캐싱 함수
+async function downloadToCache(song) {
+	try {
+		const response = await fetch(song.src);
+		if (!response.ok) throw new Error('Network response was not ok');
+		const blob = await response.blob();
+		await cacheAudio(song.id, blob);
+		console.log(`[Cache] Download complete and saved: ${song.title}`);
+		
+		// (선택 사항) 다운로드 완료 후 현재 재생 중인 곡이 이 곡이라면, 
+		// 즉시 로컬 소스로 교체할 수도 있지만, 끊김 방지를 위해 다음 재생부터 적용합니다.
+	} catch (error) {
+		console.error(`[Cache] Failed to download ${song.title}:`, error);
 	}
 }
 
@@ -206,6 +263,11 @@ export function switchBranch(branchId) {
 		return;
 	}
 	currentBranch.set(branchId);
+	// [수정] currentSong 초기화 시 Blob URL 정리
+	if (activeBlobUrl) {
+		URL.revokeObjectURL(activeBlobUrl);
+		activeBlobUrl = null;
+	}
 	currentSong.set(null);
 	songs.set([]);
 	playQueue.set([]);
@@ -392,6 +454,11 @@ export async function deleteSong(songToDelete) {
 		}
 
 		if (get(currentSong)?.id === songToDelete.id) {
+			// [수정] 삭제 시에도 Blob URL 정리
+			if (activeBlobUrl) {
+				URL.revokeObjectURL(activeBlobUrl);
+				activeBlobUrl = null;
+			}
 			currentSong.set(null);
 			currentQueueIndex.set(-1);
 			currentListIndex.set(-1);
@@ -450,7 +517,9 @@ export function playSong(song) {
 	if (get(editingSongId)) return;
 	const $isShuffle = get(isShuffle);
 	const $songs = get(songs);
-	currentSong.set(song);
+	
+	// [수정] 일반 set 대신 로직 함수 사용
+	loadAndPlaySong(song);
 
 	if ($isShuffle) {
 		const otherSongs = $songs.filter((s) => s.id !== song.id);
@@ -472,7 +541,10 @@ export function playNext() {
 	}
 	currentQueueIndex.set(nextIndex);
 	const nextSong = $playQueue[nextIndex];
-	currentSong.set(nextSong);
+	
+	// [수정] 일반 set 대신 로직 함수 사용
+	loadAndPlaySong(nextSong);
+	
 	currentListIndex.set(get(songs).findIndex((s) => s.id === nextSong.id));
 }
 
@@ -485,7 +557,10 @@ export function playPrevious() {
 	}
 	currentQueueIndex.set(prevIndex);
 	const prevSong = $playQueue[prevIndex];
-	currentSong.set(prevSong);
+	
+	// [수정] 일반 set 대신 로직 함수 사용
+	loadAndPlaySong(prevSong);
+	
 	currentListIndex.set(get(songs).findIndex((s) => s.id === prevSong.id));
 }
 
