@@ -6,8 +6,8 @@
 		songs,
 		currentListIndex,
 		currentBranch,
-		editTitle, // Writable 스토어
-		editArtist, // Writable 스토어
+		editTitle,
+		editArtist,
 		moveSong,
 		saveEdit,
 		cancelEdit,
@@ -16,12 +16,16 @@
 		deleteSong
 	} from '$lib/store.js';
 
-	// props
-	let { song, index } = $props();
+	// [수정됨]
+	// export let { song, index } = $props();
+	// export let isAdminView = false;
+	// ->
+	// $props()로 모든 props를 한 번에 구조 분해 할당합니다.
+	let { song, index, isAdminView = false } = $props();
 </script>
 
 <li class:playing={$currentListIndex === index}>
-	{#if $isAdmin}
+	{#if isAdminView && $isAdmin}
 		<div class="move-controls">
 			<button
 				type="button"
@@ -44,7 +48,7 @@
 		</div>
 	{/if}
 
-	{#if $editingSongId === song.id}
+	{#if isAdminView && $editingSongId === song.id}
 		<form class="edit-form" on:submit|preventDefault={() => saveEdit(song.id)}>
 			<input
 				type="text"
@@ -76,18 +80,18 @@
 			class="song-button"
 			on:click={() => playSong(song)}
 			aria-label="Play {song.title}"
-			disabled={!!$editingSongId}
+			disabled={isAdminView && !!$editingSongId}
 		>
 			<div class="song-info">
 				<span class="title">{song.title}</span>
 				<span class="artist">{song.artist}</span>
-				{#if $isAdmin && $currentBranch === 'branch2' && song.isOld}
+				{#if isAdminView && $isAdmin && $currentBranch === 'branch2' && song.isOld}
 					<span class="old-tag">(기존 곡)</span>
 				{/if}
 			</div>
 		</button>
 
-		{#if $isAdmin}
+		{#if isAdminView && $isAdmin}
 			<div class="admin-controls">
 				<button
 					type="button"
@@ -113,7 +117,7 @@
 </li>
 
 <style>
-	/* 스타일은 이전 답변과 동일합니다 (생략하지 않고 모두 포함) */
+	/* 스타일은 변경되지 않았습니다. (생략하지 않고 모두 포함) */
 	li {
 		border-bottom: 1px solid #2a2a2a;
 		display: flex;
@@ -161,6 +165,9 @@
 	}
 	.move-controls + .song-button {
 		padding-left: 0.75rem;
+	}
+	li:not(:has(.move-controls)) .song-button {
+		padding-left: 1.2rem;
 	}
 	li:not(:has(.move-controls)) .song-button {
 		padding-left: 1.7rem;

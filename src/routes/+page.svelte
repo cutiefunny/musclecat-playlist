@@ -1,10 +1,10 @@
 <script>
-	// 필요한 스토어와 함수만 개별적으로 임포트
-	import { currentBranch, subscribeToBranch, handleAuthToggle } from '$lib/store.js';
+	// [수정됨] handleAuthToggle, UploadCard 관련 임포트 제거
+	import { currentBranch, subscribeToBranch } from '$lib/store.js';
 
 	// 컴포넌트 임포트
 	import BranchSelector from '$lib/components/BranchSelector.svelte';
-	import UploadCard from '$lib/components/UploadCard.svelte';
+	// import UploadCard from '$lib/components/UploadCard.svelte'; // [제거됨]
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 	import SongList from '$lib/components/SongList.svelte';
 
@@ -15,17 +15,13 @@
 </script>
 
 <main>
-	<h1 on:click={handleAuthToggle} title="관리자 로그인/로그아웃 (클릭)">
-		근육고양이 플레이리스트
-	</h1>
+	<h1>근육고양이 플레이리스트</h1>
 
-	<BranchSelector />
-
-	<UploadCard />
+	<BranchSelector isAdminView={false} />
 
 	<AudioPlayer />
 
-	<SongList />
+	<SongList isAdminView={false} />
 </main>
 
 <style>
@@ -42,11 +38,7 @@
 	}
 	h1 {
 		color: #40c9a9;
-		cursor: pointer;
-		user-select: none;
-		-webkit-user-select: none;
-		-moz-user-select: none;
-		-ms-user-select: none;
+		/* [수정됨] cursor, user-select 등 상호작용 스타일 제거 */
 		flex-shrink: 0;
 		margin-bottom: 0.5rem;
 	}

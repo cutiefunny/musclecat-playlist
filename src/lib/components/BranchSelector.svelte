@@ -5,20 +5,23 @@
 		editingSongId,
 		switchBranch
 	} from '$lib/store.js';
+
+	// [신규] prop: 관리자 뷰인지 여부 (기본값 false)
+	export let isAdminView = false;
 </script>
 
 <div class="branch-selector">
 	<button
 		class:active={$currentBranch === 'branch1'}
 		on:click={() => switchBranch('branch1')}
-		disabled={$isLoading || $editingSongId}
+		disabled={$isLoading || (isAdminView && $editingSongId)}
 	>
 		1호점 라이브러리
 	</button>
 	<button
 		class:active={$currentBranch === 'branch2'}
 		on:click={() => switchBranch('branch2')}
-		disabled={$isLoading || $editingSongId}
+		disabled={$isLoading || (isAdminView && $editingSongId)}
 	>
 		2호점 라이브러리
 	</button>

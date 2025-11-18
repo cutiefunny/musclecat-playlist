@@ -7,6 +7,9 @@
 		isLoading
 	} from '$lib/store.js';
 	import SongItem from './SongItem.svelte';
+
+	// [신규] prop: 관리자 뷰인지 여부
+	export let isAdminView = false;
 </script>
 
 <div class="playlist-wrapper">
@@ -30,7 +33,7 @@
 	{:else}
 		<ul>
 			{#each $songs as song, index (song.id)}
-				<SongItem {song} {index} />
+				<SongItem {song} {index} {isAdminView} />
 			{/each}
 		</ul>
 	{/if}
