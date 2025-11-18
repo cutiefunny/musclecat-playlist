@@ -1,7 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
-	import { init } from '$lib/store.js'; // 개별 'init' 함수 임포트
-	import favicon from '$lib/assets/favicon.svg';
+	import { init } from '$lib/store.js';
 
 	let { children } = $props();
 
@@ -9,10 +8,6 @@
 		init(); // 스토어의 인증 감지 로직을 초기화합니다.
 	});
 </script>
-
-<svelte:head>
-	<link rel="icon" href={favicon} />
-</svelte:head>
 
 <style>
 	:global(body) {
