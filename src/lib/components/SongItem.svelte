@@ -1,0 +1,280 @@
+<script>
+	import {
+		isAdmin,
+		isLoading,
+		editingSongId,
+		songs,
+		currentListIndex,
+		currentBranch,
+		editTitle, // Writable 스토어
+		editArtist, // Writable 스토어
+		moveSong,
+		saveEdit,
+		cancelEdit,
+		playSong,
+		startEdit,
+		deleteSong
+	} from '$lib/store.js';
+
+	// props
+	let { song, index } = $props();
+</script>
+
+<li class:playing={$currentListIndex === index}>
+	{#if $isAdmin}
+		<div class="move-controls">
+			<button
+				type="button"
+				class="move-button"
+				on:click={() => moveSong(index, 'up')}
+				disabled={index === 0 || $isLoading || $editingSongId}
+				aria-label="위로 이동"
+			>
+				🔼
+			</button>
+			<button
+				type="button"
+				class="move-button"
+				on:click={() => moveSong(index, 'down')}
+				disabled={index === $songs.length - 1 || $isLoading || $editingSongId}
+				aria-label="아래로 이동"
+			>
+				🔽
+			</button>
+		</div>
+	{/if}
+
+	{#if $editingSongId === song.id}
+		<form class="edit-form" on:submit|preventDefault={() => saveEdit(song.id)}>
+			<input
+				type="text"
+				class="edit-input"
+				bind:value={$editTitle}
+				placeholder="제목"
+				required
+			/>
+			<input
+				type="text"
+				class="edit-input"
+				bind:value={$editArtist}
+				placeholder="아티스트"
+				required
+			/>
+			<button type="submit" class="edit-button edit-save" disabled={$isLoading}>저장</button>
+			<button
+				type="button"
+				class="edit-button edit-cancel"
+				on:click={cancelEdit}
+				disabled={$isLoading}
+			>
+				취소
+			</button>
+		</form>
+	{:else}
+		<button
+			type="button"
+			class="song-button"
+			on:click={() => playSong(song)}
+			aria-label="Play {song.title}"
+			disabled={!!$editingSongId}
+		>
+			<div class="song-info">
+				<span class="title">{song.title}</span>
+				<span class="artist">{song.artist}</span>
+				{#if $isAdmin && $currentBranch === 'branch2' && song.isOld}
+					<span class="old-tag">(기존 곡)</span>
+				{/if}
+			</div>
+		</button>
+
+		{#if $isAdmin}
+			<div class="admin-controls">
+				<button
+					type="button"
+					class="edit-button"
+					on:click={() => startEdit(song)}
+					disabled={$isLoading || !!$editingSongId}
+					aria-label="Edit {song.title}"
+				>
+					✏️
+				</button>
+				<button
+					type="button"
+					class="delete-button"
+					on:click={() => deleteSong(song)}
+					disabled={$isLoading || !!$editingSongId}
+					aria-label="Delete {song.title}"
+				>
+					&times;
+				</button>
+			</div>
+		{/if}
+	{/if}
+</li>
+
+<style>
+	/* 스타일은 이전 답변과 동일합니다 (생략하지 않고 모두 포함) */
+	li {
+		border-bottom: 1px solid #2a2a2a;
+		display: flex;
+		align-items: stretch;
+		transition: background-color 0.2s;
+	}
+	li.playing {
+		background-color: #3a5a51;
+	}
+	.move-controls {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		flex-shrink: 0;
+		padding: 0 0.5rem;
+	}
+	.move-button {
+		background: none;
+		border: none;
+		color: #888;
+		cursor: pointer;
+		padding: 0.1rem;
+		font-size: 0.8rem;
+		line-height: 1;
+	}
+	.move-button:hover {
+		color: #fff;
+	}
+	.move-button:disabled {
+		color: #444;
+		cursor: not-allowed;
+	}
+	.song-button {
+		display: block;
+		width: 100%;
+		padding: 0.75rem;
+		background: none;
+		border: none;
+		cursor: pointer;
+		transition: background-color 0.2s;
+		text-align: left;
+		color: inherit;
+		flex-grow: 1;
+		padding-left: 0.75rem;
+	}
+	.move-controls + .song-button {
+		padding-left: 0.75rem;
+	}
+	li:not(:has(.move-controls)) .song-button {
+		padding-left: 1.7rem;
+	}
+	.song-button:hover {
+		background-color: #2a2a2a;
+	}
+	.song-button:disabled {
+		cursor: not-allowed;
+		background-color: transparent;
+	}
+	li.playing .song-button:hover {
+		background: none;
+	}
+	.song-info {
+		color: #e0e0e0;
+	}
+	.title {
+		display: block;
+		font-size: 1.1rem;
+		font-weight: bold;
+		color: #e0e0e0;
+	}
+	.artist {
+		display: block;
+		font-size: 0.9rem;
+		color: #a0a0a0;
+	}
+	.old-tag {
+		display: inline-block;
+		font-size: 0.75rem;
+		color: #888;
+		margin-left: 0.5rem;
+		font-style: italic;
+	}
+	.edit-form {
+		display: flex;
+		flex-grow: 1;
+		align-items: center;
+		padding: 0.5rem 0.75rem;
+		gap: 0.5rem;
+	}
+	.edit-input {
+		flex-grow: 1;
+		width: 30%;
+		background-color: #333;
+		color: #e0e0e0;
+		border: 1px solid #555;
+		border-radius: 4px;
+		padding: 0.5rem;
+		font-size: 0.9rem;
+	}
+	.edit-input:focus {
+		border-color: #40c9a9;
+		outline: none;
+	}
+	.admin-controls {
+		display: flex;
+		align-items: stretch;
+		flex-shrink: 0;
+	}
+	.edit-button {
+		background: none;
+		border: none;
+		color: #888;
+		padding: 0 0.75rem;
+		cursor: pointer;
+		font-size: 1.2rem;
+		transition: background-color 0.2s, color 0.2s;
+	}
+	.edit-button:hover {
+		color: #40c9a9;
+		background-color: #2a2a2a;
+	}
+	.edit-button.edit-save {
+		font-size: 0.9rem;
+		font-weight: bold;
+		color: #40c9a9;
+	}
+	.edit-button.edit-cancel {
+		font-size: 0.9rem;
+		color: #aaa;
+	}
+	.edit-button.edit-save:hover {
+		background-color: #36ab8f;
+		color: #121212;
+	}
+	.edit-button.edit-cancel:hover {
+		background-color: #555;
+		color: #fff;
+	}
+	.edit-button:disabled {
+		color: #555;
+		cursor: not-allowed;
+		background: none;
+	}
+	.delete-button {
+		background: none;
+		border: none;
+		color: #888;
+		padding: 0 1.25rem;
+		cursor: pointer;
+		font-size: 1.5rem;
+		font-weight: bold;
+		transition: background-color 0.2s, color 0.2s;
+		flex-shrink: 0;
+	}
+	.delete-button:hover {
+		background-color: #b04040;
+		color: #fff;
+	}
+	.delete-button:disabled {
+		color: #555;
+		cursor: not-allowed;
+		background: none;
+	}
+</style>
