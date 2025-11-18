@@ -55,6 +55,8 @@ export const editArtist = writable('');
 // 재생 상태
 export const currentSong = writable(null);
 export const isShuffle = writable(false);
+// [신규] 반복 모드 상태 (0: 반복 없음, 1: 전체 반복, 2: 한 곡 반복)
+export const repeatMode = writable(1); // 기본값: 전체 반복
 export const playQueue = writable([]);
 export const currentListIndex = writable(-1);
 export const currentQueueIndex = writable(-1);
