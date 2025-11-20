@@ -26,8 +26,13 @@ import {
 	orderBy
 } from 'firebase/firestore';
 
-// [신규] 캐시 모듈 임포트
-import { getCachedAudio, cacheAudio } from '$lib/cache.js';
+// [수정] 추가된 함수 임포트
+import {
+	getCachedAudio,
+	cacheAudio,
+	getCachedSongIds,
+	removeCachedAudio
+} from '$lib/cache.js';
 
 // --- 1. 상태 변수 (Writables) ---
 export const isLoading = writable(false);
@@ -47,8 +52,8 @@ let unsubscribeFirestore = () => {};
 
 // 목록 상태
 export const songs = writable([]);
-let branchSongsList = []; // 비공개 내부 변수
-let oldSongsList = []; // 비공개 내부 변수
+let branchSongsList = [];
+let oldSongsList = [];
 
 // 수정 상태
 export const editingSongId = writable(null);
@@ -58,11 +63,13 @@ export const editArtist = writable('');
 // 재생 상태
 export const currentSong = writable(null);
 export const isShuffle = writable(false);
-// 반복 모드 상태 (0: 반복 없음, 1: 전체 반복, 2: 한 곡 반복)
 export const repeatMode = writable(1);
 export const playQueue = writable([]);
 export const currentListIndex = writable(-1);
 export const currentQueueIndex = writable(-1);
+
+// [신규] 캐시된 곡 ID 목록 (Set)
+export const cachedSongIds = writable(new Set());
 
 // [신규] Blob URL 메모리 관리를 위한 변수
 let activeBlobUrl = null;
@@ -80,9 +87,12 @@ function get(store) {
 	return value;
 }
 
-/**
- * 'songs'와 'branchSongs' 목록을 병합하고 정렬하여 메인 'songs' 스토어를 업데이트합니다.
- */
+// [신규] 캐시 상태 동기화 함수
+async function syncCacheStatus() {
+	const ids = await getCachedSongIds();
+	cachedSongIds.set(new Set(ids));
+}
+
 function updateMergedList() {
 	const combined = [...branchSongsList, ...oldSongsList];
 	combined.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -111,9 +121,6 @@ function updateMergedList() {
 	else statusMessage.set('로그아웃 상태');
 }
 
-/**
- * 곡 객체의 isOld 플래그를 기반으로 올바른 Firestore 문서 참조를 반환합니다.
- */
 function getSongDocRef(song) {
 	if (song.isOld) {
 		return doc(db, 'songs', song.id);
@@ -123,17 +130,14 @@ function getSongDocRef(song) {
 	}
 }
 
-// [신규] 통합 재생 헬퍼 함수 (캐시 로직 포함)
 async function loadAndPlaySong(song) {
 	if (!song) return;
 
-	// 1. 이전 Blob URL 해제 (메모리 누수 방지)
 	if (activeBlobUrl) {
 		URL.revokeObjectURL(activeBlobUrl);
 		activeBlobUrl = null;
 	}
 
-	// 2. 로컬 캐시 확인
 	const cachedBlob = await getCachedAudio(song.id);
 	let playSrc = song.src;
 	let isCached = false;
@@ -144,21 +148,19 @@ async function loadAndPlaySong(song) {
 		playSrc = activeBlobUrl;
 		isCached = true;
 	} else {
-		console.log(`[Cache] Not found locally. Playing remote & downloading: ${song.title}`);
-		// 캐시에 없으면 백그라운드 다운로드 시작
+		console.log(
+			`[Cache] Not found locally. Playing remote & downloading: ${song.title}`
+		);
 		downloadToCache(song);
 	}
 
-	// 3. currentSong 업데이트 (src를 로컬 Blob URL 혹은 원격 URL로 설정)
-	// 원본 song 객체의 src는 보존하고, 재생용 임시 객체를 생성
 	currentSong.set({
 		...song,
 		src: playSrc,
-		_isLocal: isCached // UI 표시용 플래그 (옵션)
+		_isLocal: isCached
 	});
 }
 
-// [신규] 백그라운드 다운로드 및 캐싱 함수
 async function downloadToCache(song) {
 	try {
 		const response = await fetch(song.src);
@@ -166,9 +168,13 @@ async function downloadToCache(song) {
 		const blob = await response.blob();
 		await cacheAudio(song.id, blob);
 		console.log(`[Cache] Download complete and saved: ${song.title}`);
-		
-		// (선택 사항) 다운로드 완료 후 현재 재생 중인 곡이 이 곡이라면, 
-		// 즉시 로컬 소스로 교체할 수도 있지만, 끊김 방지를 위해 다음 재생부터 적용합니다.
+
+		// [수정] 다운로드 완료 시 캐시 상태 업데이트
+		cachedSongIds.update((s) => {
+			const next = new Set(s);
+			next.add(song.id);
+			return next;
+		});
 	} catch (error) {
 		console.error(`[Cache] Failed to download ${song.title}:`, error);
 	}
@@ -176,12 +182,12 @@ async function downloadToCache(song) {
 
 // --- 3. 외부 호출 함수 (공개) ---
 
-/**
- * Firestore 데이터 구독을 초기화합니다.
- */
 export function subscribeToBranch(branch) {
 	if (!db) return;
 	unsubscribeFirestore();
+
+	// [신규] 지점 변경 시 캐시 상태도 최신화
+	syncCacheStatus();
 
 	branchSongsList = [];
 	oldSongsList = [];
@@ -251,9 +257,6 @@ export function subscribeToBranch(branch) {
 	}
 }
 
-/**
- * 지점(Branch) 전환 함수
- */
 export function switchBranch(branchId) {
 	const $isLoading = get(isLoading);
 	const $editingSongId = get(editingSongId);
@@ -263,7 +266,6 @@ export function switchBranch(branchId) {
 		return;
 	}
 	currentBranch.set(branchId);
-	// [수정] currentSong 초기화 시 Blob URL 정리
 	if (activeBlobUrl) {
 		URL.revokeObjectURL(activeBlobUrl);
 		activeBlobUrl = null;
@@ -275,9 +277,6 @@ export function switchBranch(branchId) {
 	currentQueueIndex.set(-1);
 }
 
-/**
- * 로그인/로그아웃 토글 함수
- */
 export async function handleAuthToggle() {
 	const $isLoading = get(isLoading);
 	const $editingSongId = get(editingSongId);
@@ -304,9 +303,6 @@ export async function handleAuthToggle() {
 	}
 }
 
-/**
- * 파일 업로드 핸들러
- */
 export async function handleFileUpload(event) {
 	const files = event.target.files;
 	if (!files || files.length === 0) return;
@@ -366,9 +362,6 @@ export async function handleFileUpload(event) {
 	}
 }
 
-/**
- * 곡 순서 변경 (위/아래)
- */
 export async function moveSong(currentIndex, direction) {
 	if (!get(isAdmin) || get(editingSongId)) return;
 
@@ -392,7 +385,6 @@ export async function moveSong(currentIndex, direction) {
 	}
 }
 
-// --- 수정 관련 함수 ---
 export function startEdit(song) {
 	editingSongId.set(song.id);
 	editTitle.set(song.title);
@@ -436,9 +428,6 @@ export async function saveEdit(songId) {
 	}
 }
 
-/**
- * 음원 삭제
- */
 export async function deleteSong(songToDelete) {
 	if (!get(isAdmin) || get(editingSongId)) return;
 	if (!songToDelete) return;
@@ -454,7 +443,6 @@ export async function deleteSong(songToDelete) {
 		}
 
 		if (get(currentSong)?.id === songToDelete.id) {
-			// [수정] 삭제 시에도 Blob URL 정리
 			if (activeBlobUrl) {
 				URL.revokeObjectURL(activeBlobUrl);
 				activeBlobUrl = null;
@@ -470,6 +458,15 @@ export async function deleteSong(songToDelete) {
 			await deleteObject(audioRef);
 		}
 		await deleteDoc(docRef);
+
+		// [수정] 로컬 캐시에서도 삭제 및 상태 업데이트
+		await removeCachedAudio(songToDelete.id);
+		cachedSongIds.update((s) => {
+			const next = new Set(s);
+			next.delete(songToDelete.id);
+			return next;
+		});
+
 		statusMessage.set(`'${songToDelete.title}' 삭제 완료.`);
 	} catch (error) {
 		console.error('Error deleting song:', error);
@@ -479,7 +476,6 @@ export async function deleteSong(songToDelete) {
 	}
 }
 
-// --- 재생 관련 함수 ---
 function getShuffledArray(array) {
 	const newArr = [...array];
 	for (let i = newArr.length - 1; i > 0; i--) {
@@ -517,8 +513,7 @@ export function playSong(song) {
 	if (get(editingSongId)) return;
 	const $isShuffle = get(isShuffle);
 	const $songs = get(songs);
-	
-	// [수정] 일반 set 대신 로직 함수 사용
+
 	loadAndPlaySong(song);
 
 	if ($isShuffle) {
@@ -541,10 +536,9 @@ export function playNext() {
 	}
 	currentQueueIndex.set(nextIndex);
 	const nextSong = $playQueue[nextIndex];
-	
-	// [수정] 일반 set 대신 로직 함수 사용
+
 	loadAndPlaySong(nextSong);
-	
+
 	currentListIndex.set(get(songs).findIndex((s) => s.id === nextSong.id));
 }
 
@@ -557,14 +551,12 @@ export function playPrevious() {
 	}
 	currentQueueIndex.set(prevIndex);
 	const prevSong = $playQueue[prevIndex];
-	
-	// [수정] 일반 set 대신 로직 함수 사용
+
 	loadAndPlaySong(prevSong);
-	
+
 	currentListIndex.set(get(songs).findIndex((s) => s.id === prevSong.id));
 }
 
-// --- 4. 스토어 초기화 로직 (Auth 감지) ---
 export function init() {
 	const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
 		currentUser.set(user);
@@ -572,5 +564,4 @@ export function init() {
 			cancelEdit();
 		}
 	});
-	// Note: We don't return unsubscribeAuth here as the store lives forever.
 }

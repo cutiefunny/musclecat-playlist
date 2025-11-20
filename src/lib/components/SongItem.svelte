@@ -13,14 +13,10 @@
 		cancelEdit,
 		playSong,
 		startEdit,
-		deleteSong
+		deleteSong,
+		cachedSongIds // [신규] 스토어 임포트
 	} from '$lib/store.js';
 
-	// [수정됨]
-	// export let { song, index } = $props();
-	// export let isAdminView = false;
-	// ->
-	// $props()로 모든 props를 한 번에 구조 분해 할당합니다.
 	let { song, index, isAdminView = false } = $props();
 </script>
 
@@ -83,7 +79,12 @@
 			disabled={isAdminView && !!$editingSongId}
 		>
 			<div class="song-info">
-				<span class="title">{song.title}</span>
+				<span class="title">
+					{song.title}
+					{#if $cachedSongIds.has(song.id)}
+						<span class="cached-icon" title="기기에 저장됨">💾</span>
+					{/if}
+				</span>
 				<span class="artist">{song.artist}</span>
 				{#if isAdminView && $isAdmin && $currentBranch === 'branch2' && song.isOld}
 					<span class="old-tag">(기존 곡)</span>
@@ -117,7 +118,6 @@
 </li>
 
 <style>
-	/* 스타일은 변경되지 않았습니다. (생략하지 않고 모두 포함) */
 	li {
 		border-bottom: 1px solid #2a2a2a;
 		display: flex;
@@ -190,6 +190,13 @@
 		font-size: 1.1rem;
 		font-weight: bold;
 		color: #e0e0e0;
+	}
+	/* [신규] 아이콘 스타일 */
+	.cached-icon {
+		font-size: 0.8em;
+		margin-left: 0.3rem;
+		cursor: help;
+		vertical-align: middle;
 	}
 	.artist {
 		display: block;
