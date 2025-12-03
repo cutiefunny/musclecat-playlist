@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>근육고양이 플레이리스트 - 앱 소개</title>
+    <style>
+        :root {
+            --primary-color: #40c9a9;
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --text-muted: #a0a0a0;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 2rem;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        section {
+            margin-bottom: 3rem;
+        }
+
+        h2 {
+            color: var(--primary-color);
+            border-left: 4px solid var(--primary-color);
+            padding-left: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        h3 {
+            color: #fff;
+            margin-top: 1.5rem;
+        }
+
+        p {
+            color: #ccc;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+            padding-left: 1.5rem;
+            position: relative;
+        }
+
+        li::before {
+            content: "✓";
+            color: var(--primary-color);
+            position: absolute;
+            left: 0;
+            font-weight: bold;
+        }
+
+        code {
+            background-color: #333;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #ffcc00;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        .badge.admin { background-color: #b04040; color: #fff; }
+        .badge.user { background-color: #3a5a51; color: #40c9a9; }
+
+        footer {
+            text-align: center;
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>근육고양이 플레이리스트</h1>
+        <p class="subtitle">매장 음악 관리를 위한 스마트 오디오 플레이어 & 원격 제어 시스템</p>
+    </header>
+
+    <section>
+        <h2>🎵 프로젝트 개요</h2>
+        <p>
+            <strong>근육고양이 플레이리스트</strong>는 다수의 오프라인 매장(1호점, 2호점 등)에서 재생되는 배경음악(BGM)을 
+            효율적으로 관리하고 제어하기 위해 개발된 웹 애플리케이션입니다. 
+            단순한 음악 재생을 넘어, <strong>원격 제어, 실시간 동기화, 오프라인 캐싱</strong> 등 
+            매장 운영에 최적화된 강력한 기능을 제공합니다.
+        </p>
+    </section>
+
+    <section>
+        <h2>✨ 주요 기능</h2>
+        
+        <div class="feature-grid">
+            <div class="card">
+                <span class="card-icon">🎧</span>
+                <h3>멀티 지점 관리</h3>
+                <p>단일 앱에서 여러 지점의 플레이리스트를 독립적으로 관리합니다.</p>
+                <ul>
+                    <li>1호점 / 2호점 라이브러리 분리</li>
+                    <li>지점별 고유 재생 목록 유지</li>
+                    <li>기기별 전용 모드(Device Mode) 지원</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <span class="card-icon">📡</span>
+                <h3>실시간 원격 제어 (Remote)</h3>
+                <p>관리자가 외부에서 매장 음악을 실시간으로 컨트롤할 수 있습니다.</p>
+                <ul>
+                    <li>재생/일시정지/곡 넘기기 원격 제어</li>
+                    <li>현재 재생 중인 곡 실시간 모니터링</li>
+                    <li>기기 연결 상태(Online/Offline) 확인</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <span class="card-icon">💾</span>
+                <h3>스마트 캐싱 & 오프라인</h3>
+                <p>네트워크가 불안정해도 끊김 없는 음악 재생을 보장합니다.</p>
+                <ul>
+                    <li>재생된 음원 <code>IndexedDB</code> 자동 캐싱</li>
+                    <li>PWA 지원으로 앱처럼 설치 및 실행</li>
+                    <li>데이터 절약 및 로딩 속도 최적화</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <span class="card-icon">🎛️</span>
+                <h3>관리자 전용 기능</h3>
+                <p>권한이 있는 관리자 계정만 접근 가능한 강력한 도구들입니다.</p>
+                <ul>
+                    <li>음원 파일 대량 업로드 (Drag & Drop)</li>
+                    <li>곡 정보(제목, 아티스트) 수정 및 삭제</li>
+                    <li>재생 순서 변경 및 라이브러리 관리</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>📱 사용자 가이드</h2>
+
+        <h3>1. 기기 설정 (초기 실행)</h3>
+        <p>앱을 처음 실행하면 <strong>기기 설정 화면</strong>이 나타납니다. 해당 기기의 역할을 선택해주세요.</p>
+        <ul>
+            <li><strong>🏪 1호점/2호점 플레이어:</strong> 매장에 비치된 재생 전용 기기로 설정합니다. (PIN 인증 필요: <code>7997</code>)</li>
+            <li><strong>📱 그 외 기기:</strong> 관리자가 모니터링하거나 개인적으로 청취할 때 사용합니다.</li>
+        </ul>
+
+        <h3>2. 플레이어 제어</h3>
+        <p>직관적인 UI로 음악을 제어할 수 있습니다.</p>
+        <ul>
+            <li><strong>재생/정지:</strong> 하단 플레이어 바의 버튼 또는 키보드 미디어 키 사용</li>
+            <li><strong>셔플/반복:</strong> 🔀 셔플 모드 및 🔁 전체/한곡 반복 모드 지원</li>
+            <li><strong>Media Session:</strong> 모바일 잠금 화면 및 알림 센터에서도 제어 가능</li>
+        </ul>
+
+        <h3>3. 관리자 페이지 (Admin)</h3>
+        <p>우측 상단 타이틀을 클릭하여 로그인 후 관리자 기능을 사용할 수 있습니다.</p>
+        <ul>
+            <li><span class="badge admin">Admin</span><strong>파일 업로드:</strong> 여러 개의 오디오 파일을 한 번에 선택하여 업로드합니다.</li>
+            <li><span class="badge admin">Admin</span><strong>실시간 모니터링:</strong> 각 지점에서 어떤 곡이 재생 중인지 확인하고, 원격으로 제어합니다.</li>
+        </ul>
+    </section>
+
+    <section>
+        <h2>🛠️ 기술 스택</h2>
+        <p>최신 웹 기술을 사용하여 빠르고 안정적인 서비스를 구현했습니다.</p>
+        <ul>
+            <li><strong>Frontend:</strong> Svelte 5 (Runes), SvelteKit</li>
+            <li><strong>Backend:</strong> Firebase (Firestore, Storage, Authentication)</li>
+            <li><strong>State Management:</strong> Svelte 5 Reactivity System (<code>$state</code>, <code>$effect</code>)</li>
+            <li><strong>Storage:</strong> IndexedDB (Local Caching), localStorage</li>
+            <li><strong>PWA:</strong> Service Worker, Manifest</li>
+        </ul>
+    </section>
+
+    <footer>
+        <p>© 2025 근육고양이 스튜디오. All rights reserved.</p>
+    </footer>
+</div>
+
+</body>
+</html>
