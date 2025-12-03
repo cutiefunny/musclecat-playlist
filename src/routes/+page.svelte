@@ -5,9 +5,8 @@
 	import SongList from '$lib/components/SongList.svelte';
 	import DeviceSetup from '$lib/components/DeviceSetup.svelte';
 
-	// 리셋 핸들러 (개발/테스트용 혹은 숨겨진 기능으로 활용 가능)
 	function handleReset() {
-		if (confirm('기기 설정을 초기화하시겠습니까?')) {
+		if (confirm('기기 설정을 초기화하고 선택 화면으로 돌아가시겠습니까?')) {
 			musicState.resetDeviceMode();
 		}
 	}
@@ -18,7 +17,7 @@
 		<DeviceSetup />
 	{:else}
 		<div class="header-area">
-			<h1 onclick={handleReset} title="클릭 시 기기 설정 초기화">
+			<h1>
 				{#if musicState.deviceMode === 'branch1'}
 					근육고양이 1호점
 				{:else if musicState.deviceMode === 'branch2'}
@@ -27,6 +26,10 @@
 					근육고양이 플레이리스트
 				{/if}
 			</h1>
+			
+			<button class="reset-btn" onclick={handleReset} title="기기 설정 초기화" aria-label="기기 설정 초기화">
+				⚙️
+			</button>
 		</div>
 
 		{#if musicState.deviceMode === 'general'}
@@ -50,10 +53,35 @@
 		display: flex;
 		flex-direction: column;
 	}
+	
+	.header-area {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		position: relative;
+		margin-bottom: 0.5rem;
+		flex-shrink: 0;
+	}
+
 	h1 {
 		color: #40c9a9;
-		flex-shrink: 0;
-		margin-bottom: 0.5rem;
-		cursor: pointer; /* 리셋 기능을 위해 커서 추가 */
+		margin: 0;
+		font-size: 1.5rem;
+	}
+
+	.reset-btn {
+		position: absolute;
+		right: 0;
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 1.2rem;
+		padding: 0.5rem;
+		transition: transform 0.2s;
+		opacity: 0.7;
+	}
+	.reset-btn:hover {
+		transform: rotate(90deg);
+		opacity: 1;
 	}
 </style>

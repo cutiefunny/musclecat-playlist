@@ -44,8 +44,10 @@ class MusicState {
 	isAdmin = $derived(this.currentUser?.email === ADMIN_EMAIL);
 
 	// 지점(Branch) & 디바이스 모드 상태
-	currentBranch = $state('branch2');
-	// null: 미설정, 'general': 일반/관리자, 'branch1'/'branch2': 고정 플레이어
+	// [수정] 초기값을 null로 하여 최초 설정 시 반드시 구독이 트리거되도록 함
+	currentBranch = $state(null); 
+	
+	// deviceMode: null(미설정), 'general'(일반), 'branch1'/'branch2'(고정)
 	deviceMode = $state(null);
 	_unsubscribeFirestore = () => {};
 
@@ -62,20 +64,20 @@ class MusicState {
 	// 재생 상태
 	currentSong = $state(null);
 	isShuffle = $state(false);
-	repeatMode = $state(1); // 0: 없음, 1: 전체, 2: 한곡
+	repeatMode = $state(1);
 	playQueue = $state([]);
 	currentListIndex = $state(-1);
 	currentQueueIndex = $state(-1);
-	isPlaying = $state(false); // 재생/일시정지 상태
+	isPlaying = $state(false);
 
-	// 관리자 모니터링 상태
+	// 모니터링 상태
 	monitoringStatus = $state({
 		branch1: null,
 		branch2: null
 	});
 	_unsubscribeMonitoring = () => {};
 
-	// 캐시 및 리소스 상태
+	// 캐시 상태
 	cachedSongIds = $state(new Set());
 	_activeBlobUrl = null;
 
@@ -83,28 +85,26 @@ class MusicState {
 
 	// --- 2. 초기화 및 기기 설정 ---
 	init() {
-		// 인증 리스너
 		onAuthStateChanged(auth, (user) => {
 			this.currentUser = user;
 			if (!this.isAdmin) this.cancelEdit();
 			this._updateStatusMessage();
 		});
 
-		// 캐시 상태 동기화
 		this._syncCacheStatus();
 
-		// 로컬 스토리지에서 기기 모드 불러오기
 		if (typeof window !== 'undefined') {
 			const savedMode = localStorage.getItem(DEVICE_MODE_KEY);
 			if (savedMode) {
-				this.setDeviceMode(savedMode, false); // false: 저장은 생략
+				this.setDeviceMode(savedMode, false);
 			} else {
 				this.statusMessage = '기기 설정이 필요합니다.';
+				// 모드가 없으면 기본적으로 2호점(기본값)을 보여줄 수도 있지만,
+				// 여기선 DeviceSetup 화면을 위해 아무것도 로드하지 않음
 			}
 		}
 	}
 
-	// 기기 모드 설정 (PIN 인증 후 호출됨)
 	setDeviceMode(mode, save = true) {
 		this.deviceMode = mode;
 
@@ -113,33 +113,43 @@ class MusicState {
 		}
 
 		if (mode === 'branch1' || mode === 'branch2') {
-			console.log(`[Device] ${mode} 고정 플레이어 모드 시작`);
-			this.switchBranch(mode); // 해당 지점 강제 로드
+			console.log(`[Device] ${mode} 고정 모드 진입`);
+			// [중요] 강제로 해당 지점 로드 (currentBranch가 null이므로 실행됨)
+			this.switchBranch(mode); 
 		} else {
-			console.log('[Device] 일반/관리자 모드');
-			// 일반 모드면 현재 선택된 지점(기본값 등) 로드
-			if (this.currentBranch) {
-				this.subscribeToBranch(this.currentBranch);
+			console.log('[Device] 일반 모드 진입');
+			// 일반 모드 기본값: 2호점 (또는 이전에 보던 곳)
+			if (!this.currentBranch) {
+				this.switchBranch('branch2');
 			}
 		}
 		this._updateStatusMessage();
 	}
 
-	// 기기 설정 초기화
 	resetDeviceMode() {
 		this.deviceMode = null;
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(DEVICE_MODE_KEY);
 		}
 		this.statusMessage = '기기 설정이 초기화되었습니다.';
+		
+		// 리소스 정리
+		this._cleanupResources();
+		this._unsubscribeFirestore();
+		this.currentBranch = null; // 지점 상태도 초기화
+	}
 
-		// 재생 중지 및 리소스 정리
+	_cleanupResources() {
 		if (this._activeBlobUrl) {
 			URL.revokeObjectURL(this._activeBlobUrl);
 			this._activeBlobUrl = null;
 		}
 		this.currentSong = null;
 		this.isPlaying = false;
+		this.songs = [];
+		this.playQueue = [];
+		this.currentListIndex = -1;
+		this.currentQueueIndex = -1;
 	}
 
 	async handleAuthToggle() {
@@ -176,7 +186,7 @@ class MusicState {
 	// --- 3. 데이터 로딩 (Firestore 구독) ---
 	subscribeToBranch(branch) {
 		if (!db) return;
-		this._unsubscribeFirestore();
+		this._unsubscribeFirestore(); // 기존 구독 해제
 
 		this._branchSongsList = [];
 		this._oldSongsList = [];
@@ -249,8 +259,8 @@ class MusicState {
 		this._updateStatusMessage();
 	}
 
-	// 지점 변경 (일반 모드에서만 가능)
 	switchBranch(branchId) {
+		// 고정 기기 모드 방어 코드
 		if (
 			(this.deviceMode === 'branch1' || this.deviceMode === 'branch2') &&
 			this.deviceMode !== branchId
@@ -259,27 +269,18 @@ class MusicState {
 			return;
 		}
 
+		// [수정] 이미 같은 지점이어도 로딩이 안 된 상태(songs가 비어있음)라면 다시 구독 시도
 		if (
-			branchId === this.currentBranch ||
-			this.isLoading ||
-			this.editingSongId
-		)
+			branchId === this.currentBranch &&
+			!this.isLoading &&
+			this.songs.length > 0
+		) {
 			return;
+		}
 
 		this.currentBranch = branchId;
+		this._cleanupResources(); // 리소스 정리
 		
-		// 리소스 정리
-		if (this._activeBlobUrl) {
-			URL.revokeObjectURL(this._activeBlobUrl);
-			this._activeBlobUrl = null;
-		}
-		this.currentSong = null;
-		this.isPlaying = false;
-		this.songs = [];
-		this.playQueue = [];
-		this.currentListIndex = -1;
-		this.currentQueueIndex = -1;
-
 		this.subscribeToBranch(branchId);
 	}
 
@@ -303,11 +304,8 @@ class MusicState {
 		};
 	}
 
-	// --- 5. 재생 및 동기화 로직 ---
-
-	// [Sync] 현재 재생 상태를 Firestore에 업로드 (플레이어용)
+	// --- 5. 재생 및 동기화 ---
 	async _syncPlaybackStatus() {
-		// 고정 기기 모드가 아니면 실행하지 않음
 		if (this.deviceMode !== 'branch1' && this.deviceMode !== 'branch2') return;
 		if (!db) return;
 
@@ -324,15 +322,13 @@ class MusicState {
 				  }
 				: null
 		};
-
 		try {
 			await setDoc(statusRef, data);
 		} catch (e) {
-			console.error('[Sync] Failed to update status:', e);
+			console.error('[Sync] Failed:', e);
 		}
 	}
 
-	// AudioPlayer 컴포넌트에서 호출
 	setPlaybackState(isPlaying) {
 		if (this.isPlaying !== isPlaying) {
 			this.isPlaying = isPlaying;
@@ -342,7 +338,6 @@ class MusicState {
 
 	async loadAndPlaySong(song) {
 		if (!song) return;
-
 		if (this._activeBlobUrl) {
 			URL.revokeObjectURL(this._activeBlobUrl);
 			this._activeBlobUrl = null;
@@ -361,7 +356,6 @@ class MusicState {
 		}
 
 		this.currentSong = { ...song, src: playSrc, _isLocal: isCached };
-		// 실제 재생 시작(isPlaying=true)은 AudioPlayer의 onPlay 이벤트에서 setPlaybackState 호출로 처리
 	}
 
 	async _downloadToCache(song) {
@@ -424,7 +418,6 @@ class MusicState {
 		if (this.playQueue.length === 0) return;
 		let nextIndex = this.currentQueueIndex + 1;
 		if (nextIndex >= this.playQueue.length) nextIndex = 0;
-
 		this.currentQueueIndex = nextIndex;
 		const nextSong = this.playQueue[nextIndex];
 		this.loadAndPlaySong(nextSong);
@@ -435,7 +428,6 @@ class MusicState {
 		if (this.playQueue.length === 0) return;
 		let prevIndex = this.currentQueueIndex - 1;
 		if (prevIndex < 0) prevIndex = this.playQueue.length - 1;
-
 		this.currentQueueIndex = prevIndex;
 		const prevSong = this.playQueue[prevIndex];
 		this.loadAndPlaySong(prevSong);
@@ -446,17 +438,14 @@ class MusicState {
 	async handleFileUpload(files) {
 		if (!files || files.length === 0) return;
 		if (!this.isAdmin) return;
-
 		this.isLoading = true;
 		this.statusMessage = `${files.length}개 업로드 시작...`;
-		let success = 0;
-		let fail = 0;
+		let success = 0, fail = 0;
 
 		try {
 			for (const file of files) {
 				const idx = success + fail + 1;
 				this.statusMessage = `(${idx}/${files.length}) '${file.name}' 처리 중...`;
-
 				try {
 					const nameBase = file.name.replace(/\.[^/.]+$/, '');
 					const parts = nameBase.split(' - ');
@@ -509,7 +498,6 @@ class MusicState {
 		try {
 			const song = this.songs.find((s) => s.id === songId);
 			if (!song) throw new Error('Song not found');
-
 			const ref = this._getSongDocRef(song);
 			await updateDoc(ref, {
 				title: this.editTitle.trim(),
@@ -529,14 +517,12 @@ class MusicState {
 		if (!this.isAdmin || this.editingSongId) return;
 		const targetIndex = direction === 'up' ? index - 1 : index + 1;
 		if (targetIndex < 0 || targetIndex >= this.songs.length) return;
-
 		this.isLoading = true;
 		try {
 			const songA = this.songs[index];
 			const songB = this.songs[targetIndex];
 			const refA = this._getSongDocRef(songA);
 			const refB = this._getSongDocRef(songB);
-
 			await updateDoc(refA, { order: songB.order });
 			await updateDoc(refB, { order: songA.order });
 		} catch (e) {
@@ -548,12 +534,8 @@ class MusicState {
 
 	async deleteSong(song) {
 		if (!this.isAdmin || this.editingSongId) return;
-
 		this.isLoading = true;
-		this.statusMessage = `'${song.title}' 삭제 중...`;
-
 		try {
-			// 현재 재생 중인 곡이면 정지 및 상태 업데이트
 			if (this.currentSong?.id === song.id) {
 				if (this._activeBlobUrl) {
 					URL.revokeObjectURL(this._activeBlobUrl);
@@ -563,15 +545,12 @@ class MusicState {
 				this.isPlaying = false;
 				this._syncPlaybackStatus();
 			}
-
 			this.playQueue = this.playQueue.filter((s) => s.id !== song.id);
 
 			if (song.src) {
 				try {
 					await deleteObject(ref(storage, song.src));
-				} catch (e) {
-					console.warn('Storage delete failed:', e);
-				}
+				} catch (e) {}
 			}
 			await deleteDoc(this._getSongDocRef(song));
 
@@ -579,20 +558,16 @@ class MusicState {
 			const nextCache = new Set(this.cachedSongIds);
 			nextCache.delete(song.id);
 			this.cachedSongIds = nextCache;
-
 			this.statusMessage = '삭제 완료';
 		} catch (e) {
 			console.error('Delete failed:', e);
-			this.statusMessage = '삭제 실패';
 		} finally {
 			this.isLoading = false;
 		}
 	}
 
 	_getSongDocRef(song) {
-		if (song.isOld) {
-			return doc(db, 'songs', song.id);
-		}
+		if (song.isOld) return doc(db, 'songs', song.id);
 		return doc(db, 'libraries', this.currentBranch, 'songs', song.id);
 	}
 }
