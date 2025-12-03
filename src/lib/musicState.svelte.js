@@ -35,21 +35,25 @@ const ADMIN_EMAIL = 'cutiefunny@gmail.com';
 const DEVICE_MODE_KEY = 'musclecat_device_mode';
 
 class MusicState {
-	// ... (기존 변수 유지)
+	// --- 1. 상태 변수 ($state) ---
 	isLoading = $state(false);
 	statusMessage = $state('초기화 중...');
+
 	currentUser = $state(null);
 	isAdmin = $derived(this.currentUser?.email === ADMIN_EMAIL);
+
 	currentBranch = $state(null);
 	deviceMode = $state(null);
 	_unsubscribeFirestore = () => {};
+
 	songs = $state([]);
 	_branchSongsList = [];
 	_oldSongsList = [];
+
 	editingSongId = $state(null);
 	editTitle = $state('');
 	editArtist = $state('');
-	
+
 	currentSong = $state(null);
 	isShuffle = $state(false);
 	repeatMode = $state(1);
@@ -58,20 +62,29 @@ class MusicState {
 	currentQueueIndex = $state(-1);
 	isPlaying = $state(false);
 
-	monitoringStatus = $state({ branch1: null, branch2: null });
+	monitoringStatus = $state({
+		branch1: null,
+		branch2: null
+	});
 	_unsubscribeMonitoring = () => {};
 
 	_unsubscribeCommands = () => {};
 	_lastCommandTime = Date.now();
-	
-	// [신규] 명령 이벤트 시그널 (상태가 같아도 명령을 수행하기 위함)
-	lastCommandEvent = $state(null); // { type: 'play', timestamp: 12345 }
+	lastCommandEvent = $state(null);
 
 	cachedSongIds = $state(new Set());
 	_activeBlobUrl = null;
 
+	toast = $state({
+		visible: false,
+		message: '',
+		type: 'info'
+	});
+	_toastTimer = null;
+
 	constructor() {}
 
+	// --- 2. 초기화 및 설정 ---
 	init() {
 		onAuthStateChanged(auth, (user) => {
 			this.currentUser = user;
@@ -82,13 +95,21 @@ class MusicState {
 		if (typeof window !== 'undefined') {
 			window.addEventListener('beforeunload', () => {
 				if (this.deviceMode === 'branch1' || this.deviceMode === 'branch2') {
-					this.resetDeviceMode(); 
+					this.resetDeviceMode();
 				}
 			});
 			const savedMode = localStorage.getItem(DEVICE_MODE_KEY);
 			if (savedMode) this.setDeviceMode(savedMode, false);
 			else this.statusMessage = '기기 설정이 필요합니다.';
 		}
+	}
+
+	showToast(message, type = 'info') {
+		if (this._toastTimer) clearTimeout(this._toastTimer);
+		this.toast = { visible: true, message, type };
+		this._toastTimer = setTimeout(() => {
+			this.toast.visible = false;
+		}, 3000);
 	}
 
 	setDeviceMode(mode, save = true) {
@@ -99,6 +120,8 @@ class MusicState {
 			console.log(`[Device] ${mode} 고정 모드 시작`);
 			this.switchBranch(mode);
 			this._subscribeToCommands();
+			// [수정] 기기 설정 즉시 상태를 동기화하여 Admin에 "연결됨" 표시
+			this._syncPlaybackStatus();
 		} else {
 			console.log('[Device] 일반 모드 진입');
 			if (!this.currentBranch) this.switchBranch('branch2');
@@ -106,56 +129,12 @@ class MusicState {
 		this._updateStatusMessage();
 	}
 
-	_subscribeToCommands() {
-		if (this._unsubscribeCommands) this._unsubscribeCommands();
-		if (!db || !this.deviceMode) return;
-
-		const cmdRef = doc(db, 'libraries', this.deviceMode, 'status', 'commands');
-		this._unsubscribeCommands = onSnapshot(cmdRef, (snapshot) => {
-			const data = snapshot.data();
-			if (!data) return;
-			// 중복 실행 방지
-			if (data.timestamp > this._lastCommandTime) {
-				this._lastCommandTime = data.timestamp;
-				this._executeCommand(data);
-			}
-		});
-	}
-
-	_executeCommand(cmd) {
-		console.log('[Command Received]', cmd);
-		
-		// [핵심] 명령 이벤트를 갱신하여 AudioPlayer가 항상 반응하도록 함
-		// (play/pause 로직은 AudioPlayer의 effect에서 처리)
-		this.lastCommandEvent = { ...cmd }; 
-
-		// 로직이 필요한 명령은 여기서 처리
-		if (cmd.type === 'next') this.playNext();
-		if (cmd.type === 'prev') this.playPrevious();
-		if (cmd.type === 'toggleShuffle') this.toggleShuffle();
-		if (cmd.type === 'setRepeat') this.repeatMode = cmd.payload;
-	}
-
-	async sendRemoteCommand(targetBranch, type, payload = null) {
-		if (!this.isAdmin || !db) return;
-		try {
-			await setDoc(doc(db, 'libraries', targetBranch, 'status', 'commands'), {
-				type,
-				payload,
-				timestamp: Date.now()
-			});
-			console.log(`[Admin] Sent '${type}' to ${targetBranch}`);
-		} catch (e) {
-			console.error('[Admin] Command failed:', e);
-		}
-	}
-
-    // ... (resetDeviceMode, cleanup, handleAuthToggle, updateStatus 등 기존 로직 동일)
-    
 	async resetDeviceMode() {
 		const targetBranch = this.deviceMode;
 		if ((targetBranch === 'branch1' || targetBranch === 'branch2') && db) {
-			try { await deleteDoc(doc(db, 'libraries', targetBranch, 'status', 'nowPlaying')); } catch (e) {}
+			try {
+				await deleteDoc(doc(db, 'libraries', targetBranch, 'status', 'nowPlaying'));
+			} catch (e) {}
 		}
 		this.deviceMode = null;
 		if (typeof window !== 'undefined') localStorage.removeItem(DEVICE_MODE_KEY);
@@ -167,7 +146,10 @@ class MusicState {
 	}
 
 	_cleanupResources() {
-		if (this._activeBlobUrl) { URL.revokeObjectURL(this._activeBlobUrl); this._activeBlobUrl = null; }
+		if (this._activeBlobUrl) {
+			URL.revokeObjectURL(this._activeBlobUrl);
+			this._activeBlobUrl = null;
+		}
 		this.currentSong = null;
 		this.isPlaying = false;
 		this.songs = [];
@@ -186,7 +168,14 @@ class MusicState {
 		} else {
 			this.isLoading = true;
 			this.statusMessage = 'Google 계정으로 로그인 중...';
-			try { await login(); } catch (error) { console.error('Login failed:', error); this.statusMessage = '로그인 실패'; } finally { this.isLoading = false; }
+			try {
+				await login();
+			} catch (error) {
+				console.error('Login failed:', error);
+				this.statusMessage = '로그인 실패';
+			} finally {
+				this.isLoading = false;
+			}
 		}
 	}
 
@@ -199,6 +188,59 @@ class MusicState {
 		else this.statusMessage = '로그아웃 상태';
 	}
 
+	// --- 3. 명령 수신 및 실행 ---
+	_subscribeToCommands() {
+		if (this._unsubscribeCommands) this._unsubscribeCommands();
+		if (!db || !this.deviceMode) return;
+
+		const cmdRef = doc(db, 'libraries', this.deviceMode, 'status', 'commands');
+		this._unsubscribeCommands = onSnapshot(cmdRef, (snapshot) => {
+			const data = snapshot.data();
+			if (!data) return;
+			if (data.timestamp > this._lastCommandTime) {
+				this._lastCommandTime = data.timestamp;
+				this._executeCommand(data);
+			}
+		});
+	}
+
+	_executeCommand(cmd) {
+		console.log('[Command Received]', cmd);
+		this.lastCommandEvent = { ...cmd };
+
+		if (cmd.type === 'next') this.playNext();
+		if (cmd.type === 'prev') this.playPrevious();
+		if (cmd.type === 'toggleShuffle') this.toggleShuffle();
+		if (cmd.type === 'setRepeat') this.cycleRepeatMode(cmd.payload);
+		if (cmd.type === 'playSong') this.loadAndPlaySong(cmd.payload);
+	}
+
+	async sendRemoteCommand(targetBranch, type, payload = null) {
+		if (!this.isAdmin || !db) return;
+		try {
+			await setDoc(doc(db, 'libraries', targetBranch, 'status', 'commands'), {
+				type,
+				payload,
+				timestamp: Date.now()
+			});
+			console.log(`[Admin] Sent '${type}' to ${targetBranch}`);
+		} catch (e) {
+			console.error('[Admin] Command failed:', e);
+			this.showToast('명령 전송 실패', 'error');
+		}
+	}
+
+	playSongFromAdmin(song) {
+		const targetBranch = this.currentBranch;
+		if (!this.monitoringStatus[targetBranch]) {
+			this.showToast(`${targetBranch === 'branch1' ? '1호점' : '2호점'} 기기 미연결`, 'error');
+			return;
+		}
+		this.sendRemoteCommand(targetBranch, 'playSong', song);
+		this.showToast(`'${song.title}' 재생 요청됨`, 'success');
+	}
+
+	// --- 4. 데이터 로딩 ---
 	subscribeToBranch(branch) {
 		if (!db) return;
 		this._unsubscribeFirestore();
@@ -208,7 +250,11 @@ class MusicState {
 			this.statusMessage = '1호점 목록 로딩 중...';
 			const q = query(collection(db, 'libraries', 'branch1', 'songs'), orderBy('order', 'asc'));
 			const unsub = onSnapshot(q, (snapshot) => {
-				this._branchSongsList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data(), isOld: false }));
+				this._branchSongsList = snapshot.docs.map((doc) => ({
+					id: doc.id,
+					...doc.data(),
+					isOld: false
+				}));
 				this._oldSongsList = [];
 				this._updateMergedList();
 			});
@@ -217,15 +263,26 @@ class MusicState {
 			this.statusMessage = '2호점 목록 로딩 중...';
 			const qBranch2 = query(collection(db, 'libraries', 'branch2', 'songs'), orderBy('order', 'asc'));
 			const unsubBranch2 = onSnapshot(qBranch2, (snapshot) => {
-				this._branchSongsList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data(), isOld: false }));
+				this._branchSongsList = snapshot.docs.map((doc) => ({
+					id: doc.id,
+					...doc.data(),
+					isOld: false
+				}));
 				this._updateMergedList();
 			});
 			const qOld = query(collection(db, 'songs'), orderBy('order', 'asc'));
 			const unsubOld = onSnapshot(qOld, (snapshot) => {
-				this._oldSongsList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data(), isOld: true }));
+				this._oldSongsList = snapshot.docs.map((doc) => ({
+					id: doc.id,
+					...doc.data(),
+					isOld: true
+				}));
 				this._updateMergedList();
 			});
-			this._unsubscribeFirestore = () => { unsubBranch2(); unsubOld(); };
+			this._unsubscribeFirestore = () => {
+				unsubBranch2();
+				unsubOld();
+			};
 		}
 	}
 
@@ -236,14 +293,22 @@ class MusicState {
 		this.cancelEdit();
 		if (!this.isShuffle) {
 			this.playQueue = [...this.songs];
-			this.currentQueueIndex = this.currentSong ? this.songs.findIndex((s) => s.id === this.currentSong.id) : -1;
+			this.currentQueueIndex = this.currentSong
+				? this.songs.findIndex((s) => s.id === this.currentSong.id)
+				: -1;
 		}
-		this.currentListIndex = this.currentSong ? this.songs.findIndex((s) => s.id === this.currentSong.id) : -1;
+		this.currentListIndex = this.currentSong
+			? this.songs.findIndex((s) => s.id === this.currentSong.id)
+			: -1;
 		this._updateStatusMessage();
 	}
 
 	switchBranch(branchId) {
-		if ((this.deviceMode === 'branch1' || this.deviceMode === 'branch2') && this.deviceMode !== branchId) return;
+		if (
+			(this.deviceMode === 'branch1' || this.deviceMode === 'branch2') &&
+			this.deviceMode !== branchId
+		)
+			return;
 		if (branchId === this.currentBranch && !this.isLoading && this.songs.length > 0) return;
 		this.currentBranch = branchId;
 		this._cleanupResources();
@@ -253,21 +318,44 @@ class MusicState {
 	subscribeToAllDeviceStatuses() {
 		if (this._unsubscribeMonitoring) this._unsubscribeMonitoring();
 		if (!db) return;
-		const unsub1 = onSnapshot(doc(db, 'libraries', 'branch1', 'status', 'nowPlaying'), (doc) => (this.monitoringStatus.branch1 = doc.data() || null));
-		const unsub2 = onSnapshot(doc(db, 'libraries', 'branch2', 'status', 'nowPlaying'), (doc) => (this.monitoringStatus.branch2 = doc.data() || null));
-		this._unsubscribeMonitoring = () => { unsub1(); unsub2(); };
+		const unsub1 = onSnapshot(
+			doc(db, 'libraries', 'branch1', 'status', 'nowPlaying'),
+			(doc) => (this.monitoringStatus.branch1 = doc.data() || null)
+		);
+		const unsub2 = onSnapshot(
+			doc(db, 'libraries', 'branch2', 'status', 'nowPlaying'),
+			(doc) => (this.monitoringStatus.branch2 = doc.data() || null)
+		);
+		this._unsubscribeMonitoring = () => {
+			unsub1();
+			unsub2();
+		};
 	}
 
+	// --- 5. 재생 및 동기화 ---
 	async _syncPlaybackStatus() {
 		if (this.deviceMode !== 'branch1' && this.deviceMode !== 'branch2') return;
 		if (!db) return;
 		const statusRef = doc(db, 'libraries', this.deviceMode, 'status', 'nowPlaying');
 		const data = {
 			isPlaying: this.isPlaying,
+			isShuffle: this.isShuffle,
+			repeatMode: this.repeatMode,
 			updatedAt: serverTimestamp(),
-			currentSong: this.currentSong ? { id: this.currentSong.id, title: this.currentSong.title, artist: this.currentSong.artist, isOld: !!this.currentSong.isOld } : null
+			currentSong: this.currentSong
+				? {
+						id: this.currentSong.id,
+						title: this.currentSong.title,
+						artist: this.currentSong.artist,
+						isOld: !!this.currentSong.isOld
+				  }
+				: null
 		};
-		try { await setDoc(statusRef, data); } catch (e) { console.error('[Sync] Failed:', e); }
+		try {
+			await setDoc(statusRef, data);
+		} catch (e) {
+			console.error('[Sync] Failed:', e);
+		}
 	}
 
 	setPlaybackState(isPlaying) {
@@ -279,38 +367,46 @@ class MusicState {
 
 	async loadAndPlaySong(song) {
 		if (!song) return;
-		if (this._activeBlobUrl) { URL.revokeObjectURL(this._activeBlobUrl); this._activeBlobUrl = null; }
+		if (this._activeBlobUrl) {
+			URL.revokeObjectURL(this._activeBlobUrl);
+			this._activeBlobUrl = null;
+		}
 		const cachedBlob = await getCachedAudio(song.id);
 		let playSrc = song.src;
 		let isCached = false;
-		if (cachedBlob) { this._activeBlobUrl = URL.createObjectURL(cachedBlob); playSrc = this._activeBlobUrl; isCached = true; } 
-		else { this._downloadToCache(song); }
+		if (cachedBlob) {
+			this._activeBlobUrl = URL.createObjectURL(cachedBlob);
+			playSrc = this._activeBlobUrl;
+			isCached = true;
+		} else {
+			this._downloadToCache(song);
+		}
 		this.currentSong = { ...song, src: playSrc, _isLocal: isCached };
+		this._syncPlaybackStatus();
 	}
 
-    // ... (나머지 로직은 그대로 유지)
-    async _downloadToCache(song) {
-		try {
-			const response = await fetch(song.src);
-			if (!response.ok) throw new Error('Network error');
-			const blob = await response.blob();
-			await cacheAudio(song.id, blob);
-			this.cachedSongIds = new Set(this.cachedSongIds).add(song.id);
-		} catch (e) { console.error(`Download failed: ${song.title}`, e); }
+	cycleRepeatMode(setMode = null) {
+		if (setMode !== null) this.repeatMode = setMode;
+		else this.repeatMode = (this.repeatMode + 1) % 3;
+		this._syncPlaybackStatus();
 	}
-	async _syncCacheStatus() {
-		const ids = await getCachedSongIds();
-		this.cachedSongIds = new Set(ids);
-	}
+
 	toggleShuffle() {
 		this.isShuffle = !this.isShuffle;
-		if (!this.isShuffle) { this.playQueue = [...this.songs]; } 
-		else {
+		if (!this.isShuffle) {
+			this.playQueue = [...this.songs];
+		} else {
 			const otherSongs = this.songs.filter((s) => s.id !== this.currentSong?.id);
-			this.playQueue = this.currentSong ? [this.currentSong, ...this._getShuffledArray(otherSongs)] : this._getShuffledArray(this.songs);
+			this.playQueue = this.currentSong
+				? [this.currentSong, ...this._getShuffledArray(otherSongs)]
+				: this._getShuffledArray(this.songs);
 		}
-		this.currentQueueIndex = this.currentSong ? this.playQueue.findIndex((s) => s.id === this.currentSong.id) : -1;
+		this.currentQueueIndex = this.currentSong
+			? this.playQueue.findIndex((s) => s.id === this.currentSong.id)
+			: -1;
+		this._syncPlaybackStatus();
 	}
+
 	_getShuffledArray(array) {
 		const newArr = [...array];
 		for (let i = newArr.length - 1; i > 0; i--) {
@@ -319,6 +415,7 @@ class MusicState {
 		}
 		return newArr;
 	}
+
 	playSong(song) {
 		if (this.editingSongId) return;
 		this.loadAndPlaySong(song);
@@ -332,6 +429,7 @@ class MusicState {
 		}
 		this.currentListIndex = this.songs.findIndex((s) => s.id === song.id);
 	}
+
 	playNext() {
 		if (this.playQueue.length === 0) return;
 		let nextIndex = this.currentQueueIndex + 1;
@@ -341,6 +439,7 @@ class MusicState {
 		this.loadAndPlaySong(nextSong);
 		this.currentListIndex = this.songs.findIndex((s) => s.id === nextSong.id);
 	}
+
 	playPrevious() {
 		if (this.playQueue.length === 0) return;
 		let prevIndex = this.currentQueueIndex - 1;
@@ -350,11 +449,13 @@ class MusicState {
 		this.loadAndPlaySong(prevSong);
 		this.currentListIndex = this.songs.findIndex((s) => s.id === prevSong.id);
 	}
+
 	async handleFileUpload(files) {
 		if (!files || files.length === 0 || !this.isAdmin) return;
 		this.isLoading = true;
 		this.statusMessage = `${files.length}개 업로드 시작...`;
-		let success = 0, fail = 0;
+		let success = 0,
+			fail = 0;
 		try {
 			for (const file of files) {
 				const idx = success + fail + 1;
@@ -368,15 +469,36 @@ class MusicState {
 					const snapshot = await uploadBytes(storageRef, file);
 					const url = await getDownloadURL(snapshot.ref);
 					await addDoc(collection(db, 'libraries', this.currentBranch, 'songs'), {
-						title, artist, album: ' ', src: url, fileName: file.name, createdAt: serverTimestamp(), order: Date.now()
+						title,
+						artist,
+						album: ' ',
+						src: url,
+						fileName: file.name,
+						createdAt: serverTimestamp(),
+						order: Date.now()
 					});
 					success++;
-				} catch (e) { console.error('Upload failed:', e); fail++; }
+				} catch (e) {
+					console.error('Upload failed:', e);
+					fail++;
+				}
 			}
-		} finally { this.isLoading = false; this.statusMessage = `완료: 성공 ${success}, 실패 ${fail}`; }
+		} finally {
+			this.isLoading = false;
+			this.statusMessage = `완료: 성공 ${success}, 실패 ${fail}`;
+		}
 	}
-	startEdit(song) { this.editingSongId = song.id; this.editTitle = song.title; this.editArtist = song.artist; }
-	cancelEdit() { this.editingSongId = null; this.editTitle = ''; this.editArtist = ''; }
+
+	startEdit(song) {
+		this.editingSongId = song.id;
+		this.editTitle = song.title;
+		this.editArtist = song.artist;
+	}
+	cancelEdit() {
+		this.editingSongId = null;
+		this.editTitle = '';
+		this.editArtist = '';
+	}
 	async saveEdit(songId) {
 		if (!this.isAdmin || songId !== this.editingSongId) return;
 		this.isLoading = true;
@@ -384,10 +506,18 @@ class MusicState {
 			const song = this.songs.find((s) => s.id === songId);
 			if (!song) throw new Error('Song not found');
 			const ref = this._getSongDocRef(song);
-			await updateDoc(ref, { title: this.editTitle.trim(), artist: this.editArtist.trim() });
+			await updateDoc(ref, {
+				title: this.editTitle.trim(),
+				artist: this.editArtist.trim()
+			});
 			this.statusMessage = '수정 완료';
-		} catch (e) { console.error('Edit failed:', e); this.statusMessage = '수정 실패'; }
-		finally { this.isLoading = false; this.cancelEdit(); }
+		} catch (e) {
+			console.error('Edit failed:', e);
+			this.statusMessage = '수정 실패';
+		} finally {
+			this.isLoading = false;
+			this.cancelEdit();
+		}
 	}
 	async moveSong(index, direction) {
 		if (!this.isAdmin || this.editingSongId) return;
@@ -401,31 +531,61 @@ class MusicState {
 			const refB = this._getSongDocRef(songB);
 			await updateDoc(refA, { order: songB.order });
 			await updateDoc(refB, { order: songA.order });
-		} catch (e) { console.error('Move failed:', e); } finally { this.isLoading = false; }
+		} catch (e) {
+			console.error('Move failed:', e);
+		} finally {
+			this.isLoading = false;
+		}
 	}
 	async deleteSong(song) {
 		if (!this.isAdmin || this.editingSongId) return;
 		this.isLoading = true;
 		try {
 			if (this.currentSong?.id === song.id) {
-				if (this._activeBlobUrl) { URL.revokeObjectURL(this._activeBlobUrl); this._activeBlobUrl = null; }
+				if (this._activeBlobUrl) {
+					URL.revokeObjectURL(this._activeBlobUrl);
+					this._activeBlobUrl = null;
+				}
 				this.currentSong = null;
 				this.isPlaying = false;
 				this._syncPlaybackStatus();
 			}
 			this.playQueue = this.playQueue.filter((s) => s.id !== song.id);
-			if (song.src) { try { await deleteObject(ref(storage, song.src)); } catch (e) {} }
+			if (song.src) {
+				try {
+					await deleteObject(ref(storage, song.src));
+				} catch (e) {}
+			}
 			await deleteDoc(this._getSongDocRef(song));
 			await removeCachedAudio(song.id);
 			const nextCache = new Set(this.cachedSongIds);
 			nextCache.delete(song.id);
 			this.cachedSongIds = nextCache;
 			this.statusMessage = '삭제 완료';
-		} catch (e) { console.error('Delete failed:', e); } finally { this.isLoading = false; }
+		} catch (e) {
+			console.error('Delete failed:', e);
+		} finally {
+			this.isLoading = false;
+		}
 	}
 	_getSongDocRef(song) {
 		if (song.isOld) return doc(db, 'songs', song.id);
 		return doc(db, 'libraries', this.currentBranch, 'songs', song.id);
+	}
+	async _downloadToCache(song) {
+		try {
+			const response = await fetch(song.src);
+			if (!response.ok) throw new Error('Network error');
+			const blob = await response.blob();
+			await cacheAudio(song.id, blob);
+			this.cachedSongIds = new Set(this.cachedSongIds).add(song.id);
+		} catch (e) {
+			console.error(`Download failed: ${song.title}`, e);
+		}
+	}
+	async _syncCacheStatus() {
+		const ids = await getCachedSongIds();
+		this.cachedSongIds = new Set(ids);
 	}
 }
 

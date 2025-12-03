@@ -1,11 +1,12 @@
 <script>
 	import { onMount } from 'svelte';
 	import { musicState } from '$lib/musicState.svelte.js';
+	import Toast from '$lib/components/Toast.svelte'; // [신규]
 
 	let { children } = $props();
 
 	onMount(() => {
-		musicState.init(); // 로컬 스토리지 체크 및 초기화
+		musicState.init();
 	});
 </script>
 
@@ -20,5 +21,7 @@
 		height: 100vh;
 	}
 </style>
+
+<Toast />
 
 {@render children()}

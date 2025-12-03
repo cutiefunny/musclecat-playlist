@@ -14,7 +14,6 @@
 		return `${m}:${s.toString().padStart(2, '0')}`;
 	}
 
-	// [수정] 로컬 버튼: 오디오를 직접 제어 (Direct Control) -> 가장 확실함
 	function togglePlay() {
 		if (!audioEl) return;
 		if (audioEl.paused) {
@@ -24,8 +23,9 @@
 		}
 	}
 
+    // [수정] musicState의 메서드를 사용하여 동기화 보장
 	function toggleRepeat() {
-		musicState.repeatMode = (musicState.repeatMode + 1) % 3;
+		musicState.cycleRepeatMode();
 	}
 
 	function onEnded() {
@@ -43,20 +43,19 @@
 		}
 	}
 
-	// [신규] 원격 명령 감지 ($effect): 명령 이벤트가 들어오면 무조건 실행
+	// [핵심] 원격 명령 감지: 상태 값이 아니라 이벤트를 감지
 	$effect(() => {
-		const cmd = musicState.lastCommandEvent;
+		const cmd = musicState.lastCommandEvent; // 반응형 의존성 등록
 		if (cmd && audioEl) {
 			if (cmd.type === 'play') {
 				audioEl.play().catch((e) => console.warn('Remote Play failed:', e));
 			} else if (cmd.type === 'pause') {
 				audioEl.pause();
 			}
-			// next, prev 등은 musicState에서 데이터가 변경되므로 여기선 play/pause만 처리
 		}
 	});
 
-	// [유지] Media Session API
+	// Media Session 등 나머지 로직은 동일
 	$effect(() => {
 		if (musicState.currentSong && 'mediaSession' in navigator) {
 			navigator.mediaSession.metadata = new MediaMetadata({
@@ -73,19 +72,19 @@
 
 	function onPlay() {
 		paused = false;
-		musicState.setPlaybackState(true); // 상태 동기화
+		musicState.setPlaybackState(true);
 		if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 	}
 	
 	function onPause() {
 		paused = true;
-		musicState.setPlaybackState(false); // 상태 동기화
+		musicState.setPlaybackState(false);
 		if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
 	}
 </script>
 
 {#if musicState.currentSong}
-	<div class="player-wrapper">
+    <div class="player-wrapper">
 		<div class="player-info">
 			<p class="now-playing">
 				<strong>{musicState.currentSong.title}</strong>
