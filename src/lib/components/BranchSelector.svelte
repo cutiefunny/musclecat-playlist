@@ -1,33 +1,28 @@
 <script>
-	import {
-		currentBranch,
-		isLoading,
-		editingSongId,
-		switchBranch
-	} from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
 
-	// [신규] prop: 관리자 뷰인지 여부 (기본값 false)
-	export let isAdminView = false;
+	let { isAdminView = false } = $props();
 </script>
 
 <div class="branch-selector">
 	<button
-		class:active={$currentBranch === 'branch1'}
-		on:click={() => switchBranch('branch1')}
-		disabled={$isLoading || (isAdminView && $editingSongId)}
+		class:active={musicState.currentBranch === 'branch1'}
+		onclick={() => musicState.switchBranch('branch1')}
+		disabled={musicState.isLoading || (isAdminView && musicState.editingSongId)}
 	>
 		1호점 라이브러리
 	</button>
 	<button
-		class:active={$currentBranch === 'branch2'}
-		on:click={() => switchBranch('branch2')}
-		disabled={$isLoading || (isAdminView && $editingSongId)}
+		class:active={musicState.currentBranch === 'branch2'}
+		onclick={() => musicState.switchBranch('branch2')}
+		disabled={musicState.isLoading || (isAdminView && musicState.editingSongId)}
 	>
 		2호점 라이브러리
 	</button>
 </div>
 
 <style>
+	/* 스타일 기존과 동일 */
 	.branch-selector {
 		display: flex;
 		justify-content: center;

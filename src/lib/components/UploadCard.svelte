@@ -1,31 +1,32 @@
 <script>
-	import {
-		isAdmin,
-		isLoading,
-		statusMessage,
-		handleFileUpload
-	} from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
+
+	function handleFileChange(event) {
+		musicState.handleFileUpload(event.target.files);
+		event.target.value = ''; // 초기화
+	}
 </script>
 
-{#if $isAdmin}
+{#if musicState.isAdmin}
 	<div class="card">
-		<label for="file-upload" class="file-label" class:disabled={$isLoading}>
-			{$isLoading ? '처리 중...' : '음원 파일 선택'}
+		<label for="file-upload" class="file-label" class:disabled={musicState.isLoading}>
+			{musicState.isLoading ? '처리 중...' : '음원 파일 선택'}
 		</label>
 		<input
 			id="file-upload"
 			type="file"
 			accept="audio/*"
-			on:change={handleFileUpload}
+			onchange={handleFileChange}
 			style="display: none;"
-			disabled={$isLoading}
+			disabled={musicState.isLoading}
 			multiple
 		/>
-		<span class="statusMessage">{$statusMessage}</span>
+		<span class="statusMessage">{musicState.statusMessage}</span>
 	</div>
 {/if}
 
 <style>
+    /* 기존 스타일 유지 */
 	.card {
 		background-color: #1e1e1e;
 		border-radius: 8px;

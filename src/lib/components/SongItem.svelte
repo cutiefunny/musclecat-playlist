@@ -1,33 +1,17 @@
 <script>
-	import {
-		isAdmin,
-		isLoading,
-		editingSongId,
-		songs,
-		currentListIndex,
-		currentBranch,
-		editTitle,
-		editArtist,
-		moveSong,
-		saveEdit,
-		cancelEdit,
-		playSong,
-		startEdit,
-		deleteSong,
-		cachedSongIds // [신규] 스토어 임포트
-	} from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
 
 	let { song, index, isAdminView = false } = $props();
 </script>
 
-<li class:playing={$currentListIndex === index}>
-	{#if isAdminView && $isAdmin}
+<li class:playing={musicState.currentListIndex === index}>
+	{#if isAdminView && musicState.isAdmin}
 		<div class="move-controls">
 			<button
 				type="button"
 				class="move-button"
-				on:click={() => moveSong(index, 'up')}
-				disabled={index === 0 || $isLoading || $editingSongId}
+				onclick={() => musicState.moveSong(index, 'up')}
+				disabled={index === 0 || musicState.isLoading || musicState.editingSongId}
 				aria-label="위로 이동"
 			>
 				🔼
@@ -35,8 +19,8 @@
 			<button
 				type="button"
 				class="move-button"
-				on:click={() => moveSong(index, 'down')}
-				disabled={index === $songs.length - 1 || $isLoading || $editingSongId}
+				onclick={() => musicState.moveSong(index, 'down')}
+				disabled={index === musicState.songs.length - 1 || musicState.isLoading || musicState.editingSongId}
 				aria-label="아래로 이동"
 			>
 				🔽
@@ -44,28 +28,28 @@
 		</div>
 	{/if}
 
-	{#if isAdminView && $editingSongId === song.id}
-		<form class="edit-form" on:submit|preventDefault={() => saveEdit(song.id)}>
+	{#if isAdminView && musicState.editingSongId === song.id}
+		<form class="edit-form" onsubmit={(e) => { e.preventDefault(); musicState.saveEdit(song.id); }}>
 			<input
 				type="text"
 				class="edit-input"
-				bind:value={$editTitle}
+				bind:value={musicState.editTitle}
 				placeholder="제목"
 				required
 			/>
 			<input
 				type="text"
 				class="edit-input"
-				bind:value={$editArtist}
+				bind:value={musicState.editArtist}
 				placeholder="아티스트"
 				required
 			/>
-			<button type="submit" class="edit-button edit-save" disabled={$isLoading}>저장</button>
+			<button type="submit" class="edit-button edit-save" disabled={musicState.isLoading}>저장</button>
 			<button
 				type="button"
 				class="edit-button edit-cancel"
-				on:click={cancelEdit}
-				disabled={$isLoading}
+				onclick={() => musicState.cancelEdit()}
+				disabled={musicState.isLoading}
 			>
 				취소
 			</button>
@@ -74,31 +58,31 @@
 		<button
 			type="button"
 			class="song-button"
-			on:click={() => playSong(song)}
+			onclick={() => musicState.playSong(song)}
 			aria-label="Play {song.title}"
-			disabled={isAdminView && !!$editingSongId}
+			disabled={isAdminView && !!musicState.editingSongId}
 		>
 			<div class="song-info">
 				<span class="title">
 					{song.title}
-					{#if $cachedSongIds.has(song.id)}
+					{#if musicState.cachedSongIds.has(song.id)}
 						<span class="cached-icon" title="기기에 저장됨">💾</span>
 					{/if}
 				</span>
 				<span class="artist">{song.artist}</span>
-				{#if isAdminView && $isAdmin && $currentBranch === 'branch2' && song.isOld}
+				{#if isAdminView && musicState.isAdmin && musicState.currentBranch === 'branch2' && song.isOld}
 					<span class="old-tag">(기존 곡)</span>
 				{/if}
 			</div>
 		</button>
 
-		{#if isAdminView && $isAdmin}
+		{#if isAdminView && musicState.isAdmin}
 			<div class="admin-controls">
 				<button
 					type="button"
 					class="edit-button"
-					on:click={() => startEdit(song)}
-					disabled={$isLoading || !!$editingSongId}
+					onclick={() => musicState.startEdit(song)}
+					disabled={musicState.isLoading || !!musicState.editingSongId}
 					aria-label="Edit {song.title}"
 				>
 					✏️
@@ -106,8 +90,8 @@
 				<button
 					type="button"
 					class="delete-button"
-					on:click={() => deleteSong(song)}
-					disabled={$isLoading || !!$editingSongId}
+					onclick={() => musicState.deleteSong(song)}
+					disabled={musicState.isLoading || !!musicState.editingSongId}
 					aria-label="Delete {song.title}"
 				>
 					&times;
@@ -118,6 +102,7 @@
 </li>
 
 <style>
+    /* 기존 스타일 그대로 유지 */
 	li {
 		border-bottom: 1px solid #2a2a2a;
 		display: flex;
@@ -169,9 +154,6 @@
 	li:not(:has(.move-controls)) .song-button {
 		padding-left: 1.2rem;
 	}
-	li:not(:has(.move-controls)) .song-button {
-		padding-left: 1.7rem;
-	}
 	.song-button:hover {
 		background-color: #2a2a2a;
 	}
@@ -191,7 +173,6 @@
 		font-weight: bold;
 		color: #e0e0e0;
 	}
-	/* [신규] 아이콘 스타일 */
 	.cached-icon {
 		font-size: 0.8em;
 		margin-left: 0.3rem;

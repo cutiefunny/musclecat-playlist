@@ -1,38 +1,31 @@
 <script>
-	import {
-		currentBranch,
-		isShuffle,
-		toggleShuffle,
-		songs,
-		isLoading
-	} from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
 	import SongItem from './SongItem.svelte';
 
-	// [신규] prop: 관리자 뷰인지 여부
-	export let isAdminView = false;
+	let { isAdminView = false } = $props();
 </script>
 
 <div class="playlist-wrapper">
 	<div class="playlist-header">
 		<h2 class="library-title">
-			{$currentBranch === 'branch1' ? '1호점' : '2호점 (기존 곡 포함)'}
+			{musicState.currentBranch === 'branch1' ? '1호점' : '2호점 (기존 곡 포함)'}
 		</h2>
 		<button
 			type="button"
 			class="shuffle-button"
-			class:active={$isShuffle}
-			on:click={toggleShuffle}
-			title={$isShuffle ? '셔플 끄기' : '셔플 켜기'}
+			class:active={musicState.isShuffle}
+			onclick={() => musicState.toggleShuffle()}
+			title={musicState.isShuffle ? '셔플 끄기' : '셔플 켜기'}
 		>
 			🔀
 		</button>
 	</div>
 
-	{#if $songs.length === 0 && !$isLoading}
+	{#if musicState.songs.length === 0 && !musicState.isLoading}
 		<p>업로드된 음원이 없습니다.</p>
 	{:else}
 		<ul>
-			{#each $songs as song, index (song.id)}
+			{#each musicState.songs as song, index (song.id)}
 				<SongItem {song} {index} {isAdminView} />
 			{/each}
 		</ul>
@@ -40,6 +33,7 @@
 </div>
 
 <style>
+	/* 기존 스타일 유지 */
 	.playlist-wrapper {
 		text-align: left;
 		flex-grow: 1;
@@ -77,7 +71,6 @@
 		border-color: #40c9a9;
 		color: #121212;
 	}
-
 	.playlist-wrapper ul {
 		list-style: none;
 		padding: 0;

@@ -1,11 +1,11 @@
 <script>
 	import { onMount } from 'svelte';
-	import { init } from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
 
 	let { children } = $props();
 
 	onMount(() => {
-		init(); // 스토어의 인증 감지 로직을 초기화합니다.
+		musicState.init(); // 로컬 스토리지 체크 및 초기화
 	});
 </script>
 

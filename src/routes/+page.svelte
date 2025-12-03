@@ -1,27 +1,41 @@
 <script>
-	// [수정됨] handleAuthToggle, UploadCard 관련 임포트 제거
-	import { currentBranch, subscribeToBranch } from '$lib/store.js';
-
-	// 컴포넌트 임포트
+	import { musicState } from '$lib/musicState.svelte.js';
 	import BranchSelector from '$lib/components/BranchSelector.svelte';
-	// import UploadCard from '$lib/components/UploadCard.svelte'; // [제거됨]
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 	import SongList from '$lib/components/SongList.svelte';
+	import DeviceSetup from '$lib/components/DeviceSetup.svelte';
 
-	// currentBranch 스토어가 변경될 때마다 구독 함수를 다시 호출
-	currentBranch.subscribe((branch) => {
-		subscribeToBranch(branch);
-	});
+	// 리셋 핸들러 (개발/테스트용 혹은 숨겨진 기능으로 활용 가능)
+	function handleReset() {
+		if (confirm('기기 설정을 초기화하시겠습니까?')) {
+			musicState.resetDeviceMode();
+		}
+	}
 </script>
 
 <main>
-	<h1>근육고양이 플레이리스트</h1>
+	{#if musicState.deviceMode === null}
+		<DeviceSetup />
+	{:else}
+		<div class="header-area">
+			<h1 onclick={handleReset} title="클릭 시 기기 설정 초기화">
+				{#if musicState.deviceMode === 'branch1'}
+					근육고양이 1호점
+				{:else if musicState.deviceMode === 'branch2'}
+					근육고양이 2호점
+				{:else}
+					근육고양이 플레이리스트
+				{/if}
+			</h1>
+		</div>
 
-	<BranchSelector isAdminView={false} />
+		{#if musicState.deviceMode === 'general'}
+			<BranchSelector isAdminView={false} />
+		{/if}
 
-	<AudioPlayer />
-
-	<SongList isAdminView={false} />
+		<AudioPlayer />
+		<SongList isAdminView={false} />
+	{/if}
 </main>
 
 <style>
@@ -38,8 +52,8 @@
 	}
 	h1 {
 		color: #40c9a9;
-		/* [수정됨] cursor, user-select 등 상호작용 스타일 제거 */
 		flex-shrink: 0;
 		margin-bottom: 0.5rem;
+		cursor: pointer; /* 리셋 기능을 위해 커서 추가 */
 	}
 </style>

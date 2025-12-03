@@ -1,20 +1,12 @@
 <script>
-	import {
-		currentSong,
-		playNext,
-		playPrevious,
-		repeatMode,
-		playQueue,
-		currentQueueIndex
-	} from '$lib/store.js';
+	import { musicState } from '$lib/musicState.svelte.js';
 
 	let audioEl;
-	let currentTime = 0;
-	let duration = 0;
-	let paused = true;
-	let volume = 1; // 0 ~ 1
+	let currentTime = $state(0);
+	let duration = $state(0);
+	let paused = $state(true); // 로컬 UI 바인딩용
+	let volume = $state(1);
 
-	// 시간 포맷팅 (MM:SS)
 	function formatTime(seconds) {
 		if (!seconds || isNaN(seconds)) return '0:00';
 		const m = Math.floor(seconds / 60);
@@ -22,83 +14,65 @@
 		return `${m}:${s.toString().padStart(2, '0')}`;
 	}
 
-	// 재생/일시정지 토글
 	function togglePlay() {
 		if (!audioEl) return;
-		if (audioEl.paused) {
-			audioEl.play();
-		} else {
-			audioEl.pause();
-		}
+		if (audioEl.paused) audioEl.play();
+		else audioEl.pause();
 	}
 
-	// 반복 모드 토글: 0(없음) -> 1(전체) -> 2(한곡) -> 0...
 	function toggleRepeat() {
-		$repeatMode = ($repeatMode + 1) % 3;
+		musicState.repeatMode = (musicState.repeatMode + 1) % 3;
 	}
 
-	// 곡이 끝났을 때 로직
 	function onEnded() {
-		console.log('Song ended. Repeat Mode:', $repeatMode);
-		if ($repeatMode === 2) {
-			// 한 곡 반복
+		if (musicState.repeatMode === 2) {
 			audioEl.currentTime = 0;
 			audioEl.play();
-		} else if ($repeatMode === 1) {
-			// 전체 반복 (기본 playNext는 큐를 순환함)
-			playNext();
+		} else if (musicState.repeatMode === 1) {
+			musicState.playNext();
 		} else {
-			// 반복 없음
-			if ($currentQueueIndex < $playQueue.length - 1) {
-				playNext();
+			if (musicState.currentQueueIndex < musicState.playQueue.length - 1) {
+				musicState.playNext();
 			} else {
-				console.log('End of playlist.');
-				// 마지막 곡이면 정지 상태 유지 (자동 재생 안 함)
-				paused = true;
+				// [중요] 플레이리스트 끝 도달 시 상태 업데이트
+				musicState.setPlaybackState(false);
 			}
 		}
 	}
 
-	// Media Session API 로직
-	function setupMediaSession(song) {
-		if (!('mediaSession' in navigator) || !song) return;
-
-		const metadata = {
-			title: song.title,
-			artist: song.artist || '아티스트 없음',
-			album: song.album || ' '
-		};
-		navigator.mediaSession.metadata = new MediaMetadata(metadata);
-
-		navigator.mediaSession.setActionHandler('play', () => {
-			audioEl?.play();
-			navigator.mediaSession.playbackState = 'playing';
-		});
-		navigator.mediaSession.setActionHandler('pause', () => {
-			audioEl?.pause();
-			navigator.mediaSession.playbackState = 'paused';
-		});
-		navigator.mediaSession.setActionHandler('nexttrack', playNext);
-		navigator.mediaSession.setActionHandler('previoustrack', playPrevious);
-	}
+	$effect(() => {
+		if (musicState.currentSong && 'mediaSession' in navigator) {
+			navigator.mediaSession.metadata = new MediaMetadata({
+				title: musicState.currentSong.title,
+				artist: musicState.currentSong.artist || '아티스트 없음',
+				album: ' '
+			});
+			navigator.mediaSession.setActionHandler('play', () => audioEl?.play());
+			navigator.mediaSession.setActionHandler('pause', () => audioEl?.pause());
+			navigator.mediaSession.setActionHandler('nexttrack', () => musicState.playNext());
+			navigator.mediaSession.setActionHandler('previoustrack', () => musicState.playPrevious());
+		}
+	});
 
 	function onPlay() {
-		if (audioEl) {
-			navigator.mediaSession.playbackState = 'playing';
-			setupMediaSession($currentSong);
-		}
+		paused = false;
+		musicState.setPlaybackState(true); // 재생 중임을 알림 (Sync)
+		if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
 	}
+	
 	function onPause() {
-		navigator.mediaSession.playbackState = 'paused';
+		paused = true;
+		musicState.setPlaybackState(false); // 일시정지 알림 (Sync)
+		if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
 	}
 </script>
 
-{#if $currentSong}
+{#if musicState.currentSong}
 	<div class="player-wrapper">
 		<div class="player-info">
 			<p class="now-playing">
-				<strong>{$currentSong.title}</strong>
-				<span>{$currentSong.artist}</span>
+				<strong>{musicState.currentSong.title}</strong>
+				<span>{musicState.currentSong.artist}</span>
 			</p>
 		</div>
 
@@ -119,21 +93,21 @@
 			<button
 				type="button"
 				class="control-btn repeat-btn"
-				class:active={$repeatMode !== 0}
-				on:click={toggleRepeat}
+				class:active={musicState.repeatMode !== 0}
+				onclick={toggleRepeat}
 				title="반복 모드"
 			>
-				{#if $repeatMode === 2}
-					🔂 {:else if $repeatMode === 1}
+				{#if musicState.repeatMode === 2}
+					🔂 {:else if musicState.repeatMode === 1}
 					🔁 {:else}
 					➡️ {/if}
 			</button>
 
-			<button type="button" class="control-btn prev-btn" on:click={playPrevious}>
+			<button type="button" class="control-btn prev-btn" onclick={() => musicState.playPrevious()}>
 				⏮️
 			</button>
 
-			<button type="button" class="control-btn play-btn" on:click={togglePlay}>
+			<button type="button" class="control-btn play-btn" onclick={togglePlay}>
 				{#if paused}
 					▶️
 				{:else}
@@ -141,7 +115,7 @@
 				{/if}
 			</button>
 
-			<button type="button" class="control-btn next-btn" on:click={playNext}>
+			<button type="button" class="control-btn next-btn" onclick={() => musicState.playNext()}>
 				⏭️
 			</button>
 
@@ -163,20 +137,21 @@
 
 		<audio
 			bind:this={audioEl}
-			src={$currentSong.src}
+			src={musicState.currentSong.src}
 			bind:currentTime
 			bind:duration
 			bind:paused
 			bind:volume
 			autoplay
-			on:play={onPlay}
-			on:pause={onPause}
-			on:ended={onEnded}
+			onplay={onPlay}
+			onpause={onPause}
+			onended={onEnded}
 		></audio>
 	</div>
 {/if}
 
 <style>
+/* 기존 스타일 그대로 유지 */
 	.player-wrapper {
 		margin-top: 1rem;
 		background-color: #2a2a2a;
@@ -189,8 +164,6 @@
 		gap: 0.8rem;
 		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 	}
-
-	/* 1. 곡 정보 */
 	.now-playing {
 		margin: 0;
 		text-align: center;
@@ -205,8 +178,6 @@
 		color: #aaa;
 		font-size: 0.9rem;
 	}
-
-	/* 2. 프로그레스 바 */
 	.progress-container {
 		display: flex;
 		align-items: center;
@@ -226,11 +197,9 @@
 	.time.current {
 		text-align: right;
 	}
-
-	/* 3. 컨트롤 버튼 */
 	.controls {
 		display: flex;
-		justify-content: space-between; /* 버튼들을 넓게 배치 */
+		justify-content: space-between;
 		align-items: center;
 		padding: 0 1rem;
 	}
@@ -250,20 +219,18 @@
 		transform: scale(0.95);
 	}
 	.play-btn {
-		font-size: 2rem; /* 재생 버튼은 좀 더 크게 */
+		font-size: 2rem;
 	}
 	.repeat-btn {
 		font-size: 1.2rem;
-		color: #666; /* 비활성 느낌 */
+		color: #666;
 	}
 	.repeat-btn.active {
-		color: #40c9a9; /* 활성화 컬러 */
+		color: #40c9a9;
 	}
 	.spacer {
-		width: 1.2rem; /* repeat 버튼과 대칭을 위한 빈 공간 */
+		width: 1.2rem;
 	}
-
-	/* 4. 볼륨 컨트롤 */
 	.volume-container {
 		display: flex;
 		align-items: center;
