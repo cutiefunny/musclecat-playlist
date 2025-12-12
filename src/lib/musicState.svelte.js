@@ -261,27 +261,26 @@ class MusicState {
 			this._unsubscribeFirestore = () => unsub();
 		} else if (branch === 'branch2') {
 			this.statusMessage = '2호점 목록 로딩 중...';
+			
+			// [수정] 이제 모든 데이터가 이 경로로 통합되었으므로 하나만 구독합니다.
 			const qBranch2 = query(collection(db, 'libraries', 'branch2', 'songs'), orderBy('order', 'asc'));
+			
 			const unsubBranch2 = onSnapshot(qBranch2, (snapshot) => {
 				this._branchSongsList = snapshot.docs.map((doc) => ({
 					id: doc.id,
 					...doc.data(),
-					isOld: false
+					// 마이그레이션된 데이터는 이제 branch 하위 컬렉션에 있으므로 isOld는 false입니다.
+					isOld: false 
 				}));
+				
+				// 기존 목록 변수는 더 이상 사용하지 않으므로 비워줍니다.
+				this._oldSongsList = [];
 				this._updateMergedList();
 			});
-			const qOld = query(collection(db, 'songs'), orderBy('order', 'asc'));
-			const unsubOld = onSnapshot(qOld, (snapshot) => {
-				this._oldSongsList = snapshot.docs.map((doc) => ({
-					id: doc.id,
-					...doc.data(),
-					isOld: true
-				}));
-				this._updateMergedList();
-			});
+
+			// [수정] 구독 해제도 하나만 수행합니다.
 			this._unsubscribeFirestore = () => {
 				unsubBranch2();
-				unsubOld();
 			};
 		}
 	}
